@@ -24,6 +24,7 @@ type HistoryFilter = 'ALL' | 'CLOSED_WIN' | 'CLOSED_LOSS'
 
 function App() {
   const { connectionState, config, client, service, setClient, setService, setConnectionState, setProfile, logout } = useTelegramStore()
+  const liveProfits = useMT5Store(state => state.liveProfits)
   const [activePage, setActivePage] = useState("Dashboard")
   const isConnecting = useRef(false)
 
@@ -58,12 +59,20 @@ function App() {
         const mt5 = useMT5Store.getState();
         if (!mt5.isConnected || !mt5.adapter || typeof mt5.adapter.getOpenPositions !== 'function') return;
 
+        mt5.syncBalance(); // Sync live balance and equity
+
         const db = await getDb();
         const openTradesInDb = await db.select().from(trades).where(eq(trades.status, 'OPEN'));
         if (openTradesInDb.length === 0) return;
 
         const openPositions = await mt5.adapter.getOpenPositions();
         const openTickets = new Set(openPositions.map((p: any) => String(p.ticket)));
+        
+        const newProfits: Record<string, number> = {};
+        for (const p of openPositions) {
+          newProfits[String(p.ticket)] = p.profit;
+        }
+        mt5.setLiveProfits(newProfits);
         
         let changed = false;
         for (const t of openTradesInDb) {
@@ -311,20 +320,29 @@ function App() {
                 ) : (
                   <>
                     <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                      {openTrades.map((t: any) => (
-                        <div key={t.id} className="flex items-center justify-between p-2.5 rounded-lg border border-border bg-surface/50">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">{t.symbol}</div>
-                            <div className="text-[10px] text-secondary font-mono">{t.id}</div>
+                      {openTrades.map((t: any) => {
+                        const profit = liveProfits[t.id];
+                        return (
+                          <div key={t.id} className="flex items-center justify-between p-2.5 rounded-lg border border-border bg-surface/50">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium truncate">{t.symbol}</div>
+                              <div className="text-[10px] text-secondary font-mono">{t.id}</div>
+                            </div>
+                            <div className="text-right shrink-0 ml-2">
+                              {profit !== undefined ? (
+                                <div className={`text-sm font-bold ${profit >= 0 ? 'text-success' : 'text-destructive'}`}>
+                                  {profit >= 0 ? '+' : ''}{profit.toFixed(2)}
+                                </div>
+                              ) : (
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${t.direction === 'BUY' ? 'bg-success-bg text-success' : 'bg-destructive-bg text-destructive'}`}>
+                                  {t.direction}
+                                </span>
+                              )}
+                              <div className="text-[10px] text-secondary mt-0.5 tabular-nums">{t.volume} lots</div>
+                            </div>
                           </div>
-                          <div className="text-right shrink-0 ml-2">
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${t.direction === 'BUY' ? 'bg-success-bg text-success' : 'bg-destructive-bg text-destructive'}`}>
-                              {t.direction}
-                            </span>
-                            <div className="text-[10px] text-secondary mt-0.5 tabular-nums">{t.volume} lots</div>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                     <button onClick={() => setActivePage("Analytics")} className="w-full mt-6 py-2 text-sm font-medium text-accent hover:text-accent/80 transition-colors">View All Trades</button>
                   </>

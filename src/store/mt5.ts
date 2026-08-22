@@ -15,6 +15,8 @@ interface MT5State {
   adapter: MT5Adapter;
   lastSync: Date | null;
   isInitializing: boolean;
+  liveProfits: Record<string, number>;
+  setLiveProfits: (profits: Record<string, number>) => void;
   init: () => Promise<void>;
   syncAccountInfo: () => Promise<void>;
   syncBalance: () => Promise<void>;
@@ -37,6 +39,9 @@ export const useMT5Store = create<MT5State>((set, get) => ({
   adapter: createAdapter(),
   lastSync: null,
   isInitializing: false,
+  liveProfits: {},
+
+  setLiveProfits: (profits) => set({ liveProfits: profits }),
 
   updateBridgeUrl: (url) => {
     const trimmed = url.trim();

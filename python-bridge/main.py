@@ -137,7 +137,7 @@ def execute_trade():
     volume = float(trade.get("volume", 0.01))
     sl = trade.get("sl")
     tp = trade.get("tp")
-    magic = int(trade.get("magic", 234000))``
+    magic = int(trade.get("magic", 234000))
 
     if not mt5.symbol_select(symbol, True):
         return jsonify({"success": False, "message": f"Symbol {symbol} not found"}), 400
