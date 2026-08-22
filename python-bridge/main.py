@@ -126,6 +126,26 @@ def get_positions():
         })
     return jsonify({"success": True, "positions": pos_list})
 
+@app.route("/price", methods=["GET"])
+def get_price():
+    symbol = request.args.get("symbol")
+    if not symbol:
+        return jsonify({"success": False, "message": "Missing symbol"}), 400
+        
+    if not mt5.symbol_select(symbol, True):
+        return jsonify({"success": False, "message": f"Symbol {symbol} not found"}), 400
+        
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return jsonify({"success": False, "message": "Failed to get tick"}), 400
+        
+    return jsonify({
+        "success": True,
+        "ask": tick.ask,
+        "bid": tick.bid,
+        "last": tick.last
+    })
+
 @app.route("/trade/execute", methods=["POST"])
 def execute_trade():
     trade = request.json

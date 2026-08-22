@@ -1,5 +1,5 @@
 import { motion } from "framer-motion"
-import { RefreshCw } from "lucide-react"
+import { RefreshCw, TrendingUp, TrendingDown, Wallet } from "lucide-react"
 
 const container = {
   hidden: { opacity: 0 },
@@ -8,6 +8,18 @@ const container = {
     transition: { staggerChildren: 0.1, delayChildren: 0.4 }
   }
 }
+
+const item = {
+  hidden: { opacity: 0, scale: 0.95 },
+  show: { opacity: 1, scale: 1 }
+}
+
+const mockAssets = [
+  { id: 'btc', name: 'Bitcoin', symbol: 'BTC', amount: '0.45', value: '$29,345.50', change: '+2.4%', isPositive: true, color: 'bg-orange-500/10 text-orange-500' },
+  { id: 'eth', name: 'Ethereum', symbol: 'ETH', amount: '4.2', value: '$8,450.20', change: '+1.2%', isPositive: true, color: 'bg-blue-500/10 text-blue-500' },
+  { id: 'sol', name: 'Solana', symbol: 'SOL', amount: '145.5', value: '$4,125.80', change: '-0.5%', isPositive: false, color: 'bg-purple-500/10 text-purple-500' },
+  { id: 'usdc', name: 'USD Coin', symbol: 'USDC', amount: '12,500', value: '$12,500.00', change: '0.0%', isPositive: true, color: 'bg-green-500/10 text-green-500' },
+]
 
 export function YourAssetsCard() {
   return (
@@ -27,15 +39,29 @@ export function YourAssetsCard() {
         </div>
       </div>
       
-      <motion.div variants={container} initial="hidden" animate="show" className="grid grid-cols-2 gap-4">
-        {/* Empty State */}
-        <div className="flex flex-col items-center justify-center py-12 text-center col-span-2 border border-dashed border-border rounded-xl bg-surface/50">
-          <div className="w-12 h-12 bg-elevated rounded-full flex items-center justify-center text-secondary mb-4 shadow-sm">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="9" y1="14" x2="15" y2="14"></line></svg>
-          </div>
-          <h4 className="text-sm font-medium mb-1">No assets yet</h4>
-          <p className="text-xs text-secondary max-w-[200px]">Connect your broker or deposit funds to see your portfolio.</p>
-        </div>
+      <motion.div variants={container} initial="hidden" animate="show" className="flex flex-col gap-3">
+        {mockAssets.map((asset) => (
+          <motion.div key={asset.id} variants={item} className="flex items-center justify-between p-3 rounded-xl hover:bg-surface/80 transition-colors border border-transparent hover:border-border cursor-pointer">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${asset.color}`}>
+                <Wallet size={18} />
+              </div>
+              <div>
+                <div className="font-medium text-sm flex items-center gap-1">
+                  {asset.name} <span className="text-xs text-secondary bg-surface px-1.5 py-0.5 rounded-md">{asset.symbol}</span>
+                </div>
+                <div className="text-xs text-secondary">{asset.amount} {asset.symbol}</div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="font-medium text-sm">{asset.value}</div>
+              <div className={`text-xs flex items-center justify-end gap-1 ${asset.isPositive ? 'text-green-500' : 'text-red-500'}`}>
+                {asset.isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                {asset.change}
+              </div>
+            </div>
+          </motion.div>
+        ))}
       </motion.div>
     </motion.div>
   )

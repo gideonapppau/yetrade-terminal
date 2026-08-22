@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { useTelegramStore } from "./store/telegram"
 import { useMT5Store } from "./store/mt5"
 import { TelegramAuth } from "./components/telegram/TelegramAuth"
@@ -320,31 +321,46 @@ function App() {
                 ) : (
                   <>
                     <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                      {openTrades.map((t: any) => {
-                        const profit = liveProfits[t.id];
-                        return (
-                          <div key={t.id} className="flex items-center justify-between p-2.5 rounded-lg border border-border bg-surface/50">
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium truncate">{t.symbol}</div>
-                              <div className="text-[10px] text-secondary font-mono">{t.id}</div>
-                            </div>
-                            <div className="text-right shrink-0 ml-2">
-                              {profit !== undefined ? (
-                                <div className={`text-sm font-bold ${profit >= 0 ? 'text-success' : 'text-destructive'}`}>
-                                  {profit >= 0 ? '+' : ''}{profit.toFixed(2)}
-                                </div>
-                              ) : (
-                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${t.direction === 'BUY' ? 'bg-success-bg text-success' : 'bg-destructive-bg text-destructive'}`}>
-                                  {t.direction}
-                                </span>
-                              )}
-                              <div className="text-[10px] text-secondary mt-0.5 tabular-nums">{t.volume} lots</div>
-                            </div>
-                          </div>
-                        )
-                      })}
+                      <AnimatePresence mode="popLayout">
+                        {openTrades.map((t: any) => {
+                          const profit = liveProfits[t.id];
+                          return (
+                            <motion.div 
+                              layout
+                              initial={{ opacity: 0, x: -20, scale: 0.95 }}
+                              animate={{ opacity: 1, x: 0, scale: 1 }}
+                              exit={{ opacity: 0, x: 20, scale: 0.95 }}
+                              transition={{ duration: 0.2 }}
+                              key={t.id} 
+                              className="flex items-center justify-between p-2.5 rounded-lg border border-border bg-surface/50"
+                            >
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium truncate">{t.symbol}</div>
+                                <div className="text-[10px] text-secondary font-mono">{t.id}</div>
+                              </div>
+                              <div className="text-right shrink-0 ml-2">
+                                {profit !== undefined ? (
+                                  <motion.div 
+                                    key={profit}
+                                    initial={{ scale: 1.1, color: profit >= 0 ? '#10b981' : '#ef4444' }}
+                                    animate={{ scale: 1, color: profit >= 0 ? 'currentColor' : 'currentColor' }}
+                                    className={`text-sm font-bold ${profit >= 0 ? 'text-success' : 'text-destructive'}`}
+                                  >
+                                    {profit >= 0 ? '+' : ''}{profit.toFixed(2)}
+                                  </motion.div>
+                                ) : (
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${t.direction === 'BUY' ? 'bg-success-bg text-success' : 'bg-destructive-bg text-destructive'}`}>
+                                    {t.direction}
+                                  </span>
+                                )}
+                                <div className="text-[10px] text-secondary mt-0.5 tabular-nums">{t.volume} lots</div>
+                              </div>
+                            </motion.div>
+                          )
+                        })}
+                      </AnimatePresence>
                     </div>
-                    <button onClick={() => setActivePage("Analytics")} className="w-full mt-6 py-2 text-sm font-medium text-accent hover:text-accent/80 transition-colors">View All Trades</button>
+                    <button onClick={() => setActivePage("Signals")} className="w-full mt-6 py-2 text-sm font-medium text-accent hover:text-accent/80 transition-colors">View All Trades</button>
                   </>
                 )}
               </div>
@@ -385,44 +401,56 @@ function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {filteredHistory.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-12">
-                          <div className="flex flex-col items-center justify-center text-center">
-                            <div className="w-12 h-12 bg-elevated rounded-full flex items-center justify-center text-secondary mb-3 shadow-sm">
-                              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    <AnimatePresence mode="popLayout">
+                      {filteredHistory.length === 0 ? (
+                        <motion.tr 
+                          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                          key="empty-history"
+                        >
+                          <td colSpan={6} className="py-12">
+                            <div className="flex flex-col items-center justify-center text-center">
+                              <div className="w-12 h-12 bg-elevated rounded-full flex items-center justify-center text-secondary mb-3 shadow-sm">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                              </div>
+                              <h4 className="text-sm font-medium mb-1">
+                                {closedTrades.length === 0 ? "No trade history" : "No trades match your filters"}
+                              </h4>
+                              <p className="text-xs text-secondary">
+                                {closedTrades.length === 0
+                                  ? "Your past trades will appear here once they are closed."
+                                  : "Adjust the search or result filter to see more trades."}
+                              </p>
                             </div>
-                            <h4 className="text-sm font-medium mb-1">
-                              {closedTrades.length === 0 ? "No trade history" : "No trades match your filters"}
-                            </h4>
-                            <p className="text-xs text-secondary">
-                              {closedTrades.length === 0
-                                ? "Your past trades will appear here once they are closed."
-                                : "Adjust the search or result filter to see more trades."}
-                            </p>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredHistory.map((t: any) => (
-                        <tr key={t.id} className="group hover:bg-elevated/40 transition-colors">
-                          <td className="py-3 font-mono text-xs text-secondary max-w-[140px] truncate">{t.id}</td>
-                          <td className="py-3 font-medium">{t.symbol}</td>
-                          <td className="py-3">
-                            <span className={`px-2 py-1 rounded text-[10px] font-bold ${t.direction === 'BUY' ? 'bg-success-bg text-success' : 'bg-destructive-bg text-destructive'}`}>
-                              {t.direction}
-                            </span>
                           </td>
-                          <td className="py-3 text-secondary">{formatTradeDate(t.signalId)}</td>
-                          <td className="py-3 text-right tabular-nums">{t.volume} lots</td>
-                          <td className="py-3 text-center">
-                            <span className={`px-2 py-1 rounded text-xs font-medium border ${t.status === 'CLOSED_WIN' ? 'bg-success-bg border-success/20 text-success' : 'bg-destructive-bg border-destructive/20 text-destructive'}`}>
-                              {t.status === 'CLOSED_WIN' ? 'Win' : 'Loss'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    )}
+                        </motion.tr>
+                      ) : (
+                        filteredHistory.map((t: any) => (
+                          <motion.tr 
+                            layout
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            key={t.id} 
+                            className="group hover:bg-elevated/40 transition-colors"
+                          >
+                            <td className="py-3 font-mono text-xs text-secondary max-w-[140px] truncate">{t.id}</td>
+                            <td className="py-3 font-medium">{t.symbol}</td>
+                            <td className="py-3">
+                              <span className={`px-2 py-1 rounded text-[10px] font-bold ${t.direction === 'BUY' ? 'bg-success-bg text-success' : 'bg-destructive-bg text-destructive'}`}>
+                                {t.direction}
+                              </span>
+                            </td>
+                            <td className="py-3 text-secondary">{formatTradeDate(t.signalId)}</td>
+                            <td className="py-3 text-right tabular-nums">{t.volume} lots</td>
+                            <td className="py-3 text-center">
+                              <span className={`px-2 py-1 rounded text-xs font-medium border ${t.status === 'CLOSED_WIN' ? 'bg-success-bg border-success/20 text-success' : 'bg-destructive-bg border-destructive/20 text-destructive'}`}>
+                                {t.status === 'CLOSED_WIN' ? 'Win' : 'Loss'}
+                              </span>
+                            </td>
+                          </motion.tr>
+                        ))
+                      )}
+                    </AnimatePresence>
                   </tbody>
                 </table>
               </div>

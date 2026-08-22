@@ -21,5 +21,6 @@ export interface BrokerAdapter {
   executeTrade(request: ExecutionRequest): Promise<ExecutionResult>;
   getAccountInfo(): Promise<any>;
   getOpenPositions?(): Promise<any[]>;
+  getSymbolPrice?(symbol: string): Promise<{ ask: number; bid: number } | null>;
   // Additional methods like closeTrade, modifyStopLoss, etc. will go here later
 }

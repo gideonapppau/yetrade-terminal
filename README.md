@@ -1,38 +1,41 @@
-# YetTrade 🚀
+# YetTrade: Automated Trading Terminal
 
-YetTrade is a lightweight, open-source automated trading terminal that bridges Telegram and MetaTrader 5 (MT5). It reads trading signals from specific Telegram channels in real-time, parses them into actionable trade parameters, applies customizable risk management, and executes them instantly on your MT5 broker account.
+**YetTrade** is a powerful, open-source automated trading solution designed to bridge the gap between market signals and execution. It seamlessly connects Telegram signal channels directly to your MetaTrader 5 (MT5) broker account, ensuring you never miss a trading opportunity while maintaining complete control over your risk and strategy.
 
-Built with **Tauri (Rust)** for a blazing fast desktop UI, **React + TypeScript** for the frontend, and a **Python Bridge** utilizing the official `MetaTrader5` library.
+## Why YetTrade? (For Managers & Traders)
 
-## ✨ Features
+In the fast-paced world of trading, speed and reliability are everything. YetTrade automates the manual process of reading a signal from Telegram and typing it into a trading platform. 
 
-- **Live Signal Execution:** Instantly parse and execute incoming signals from selected Telegram channels.
-- **Custom Risk Engine:** Automatically calculate optimal lot sizes based on a fixed risk percentage (e.g., Risk 1% of account balance per trade).
-- **Channel Overrides:** Define custom risk parameters and daily limits on a per-channel basis.
-- **Offline-First Storage:** All trade histories, configuration settings, and signal logs are stored entirely locally on an SQLite database.
-- **V2 Ready:** Built on a robust foundation designed to support Advanced Trade Management (Trailing stops, Twin Trading) and Historical Replays in future updates.
+*   **Lightning Fast Execution:** By removing human delay, trades are entered the second a signal is broadcast.
+*   **Total Data Privacy:** There are no third-party cloud servers. Your account credentials, trading history, and API keys stay exclusively on your local computer.
+*   **Automated Risk Management:** Set your comfort level once (e.g., risk 1% of total capital per trade), and the system automatically calculates the exact position size for every trade.
+*   **Custom Control:** Fine-tune risk settings on a per-channel basis. Some signal providers are riskier than others; YetTrade lets you adjust accordingly.
 
-## 🏗️ Architecture
+## How It Works (The Architecture)
 
-YetTrade is split into three main components:
-1. **The Desktop Frontend (Tauri + React):** Handles Telegram MTProto authentication, signal listening, parsing, and UI rendering.
-2. **The Local Database (SQLite):** Maintains state across restarts, securely storing trade logs and configuration.
-3. **The Python Bridge (FastAPI/MT5):** A local HTTP server that acts as a secure intermediary between the frontend and the MetaTrader 5 terminal process on your Windows machine.
+YetTrade is built on modern, secure technologies, split into three synchronized parts:
 
-## 🚀 Getting Started
+1.  **The Command Center (Frontend Desktop App):** Built with React and Tauri (Rust), this is the beautiful desktop interface where you manage settings, view active trades, and monitor performance. It's incredibly fast and uses minimal system resources.
+2.  **The Secure Vault (Local Database):** Powered by SQLite, this locally stores your configuration and trade logs. Nothing is sent to the cloud, ensuring maximum security and compliance.
+3.  **The Execution Engine (Python Bridge):** A dedicated background service that acts as a secure translator between the Command Center and your MetaTrader 5 terminal, instantly executing the parsed trades.
+
+---
+
+## Technical Setup (For Engineers)
 
 ### Prerequisites
 
-Since this is a desktop application interacting directly with MetaTrader 5, it must be run on a **Windows** environment (MT5 restriction).
+Since YetTrade communicates directly with MetaTrader 5, it must be run on a **Windows** operating system.
 
-1. [Node.js](https://nodejs.org/en/) (v18+)
-2. [Rust](https://rustup.rs/) (latest stable)
-3. [Python](https://www.python.org/downloads/) (3.10+)
-4. MetaTrader 5 Desktop Terminal installed and running.
+Please ensure the following are installed:
+1.  [Node.js](https://nodejs.org/en/) (v18 or higher)
+2.  [Rust](https://rustup.rs/) (latest stable release)
+3.  [Python](https://www.python.org/downloads/) (3.10 or higher)
+4.  **MetaTrader 5 Desktop Terminal** (installed and currently running)
 
-### 1. Setup the Python Bridge
+### Step 1: Initialize the Execution Engine (Python Bridge)
 
-The Python bridge is required to execute trades via the MT5 terminal.
+The Python Bridge is the critical link to MT5. Open your terminal and run:
 
 ```bash
 cd python-bridge
@@ -41,40 +44,40 @@ python -m venv .venv
 pip install -r requirements.txt
 python main.py
 ```
-*(The bridge will run on `http://127.0.0.1:8000`)*
+*(The engine will start running locally at `http://127.0.0.1:8000`)*
 
-### 2. Run the Tauri Desktop App
+### Step 2: Launch the Command Center (Desktop App)
 
-Open a new terminal window at the root of the project:
+Open a new, separate terminal window at the root of the project:
 
 ```bash
-# Install dependencies
+# Install the required interface dependencies
 npm install
 
-# Start the desktop application
+# Build and start the desktop application
 npm run tauri dev
 ```
 
-### 3. Connect the Dots
+### Step 3: Configure and Connect
 
-When the application launches:
-1. Go to **Settings > Telegram Connection** and log in using your `api_id` and `api_hash` (obtainable from my.telegram.org).
-2. Go to **Settings > MetaTrader 5** and configure your broker login details.
-3. Select which Telegram channels you want the bot to actively monitor.
+Once the application window appears:
+1.  Navigate to **Settings > Telegram Connection** and authenticate using your `api_id` and `api_hash` (obtainable from my.telegram.org).
+2.  Navigate to **Settings > MetaTrader 5** and securely input your broker login credentials.
+3.  Select the specific Telegram channels you wish the terminal to monitor for trade signals.
 
 ---
 
-## 🔒 Security & Privacy
+## Future Roadmap (V2)
 
-YetTrade is built with privacy at its core. 
-- **No Cloud Servers:** There is no centralized backend. Your MT5 credentials, Telegram API keys, and trade history never leave your machine.
-- **Local SQLite:** Everything is stored locally in the `trading-terminal.db`.
-- **Open Source:** Verify the code yourself.
+We are actively building the foundation for advanced trade management, including:
+*   **Twin Trading:** Splitting positions to secure partial profits.
+*   **Trailing Stops:** Automatically locking in gains as the market moves favorably.
+*   **Historical Replays:** Backtesting signal providers against historical data to verify profitability before risking real capital.
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are welcome! If you're looking to help, check out the `v2_roadmap.md` file in the repository root for a list of planned features like Twin Trading, Trailing Stops, and Backtesting engines.
+We welcome contributions from developers and traders alike! If you're interested in helping us build the future of automated retail trading, check out the `v2_roadmap.md` file in the repository root.
 
-## 📝 License
+## License
 
-This project is licensed under the MIT License.
+This project is open-source and licensed under the MIT License.

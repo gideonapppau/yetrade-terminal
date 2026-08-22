@@ -107,4 +107,16 @@ export class MT5Adapter implements BrokerAdapter {
       return [];
     }
   }
+
+  async getSymbolPrice(symbol: string): Promise<{ ask: number; bid: number } | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/price?symbol=${encodeURIComponent(symbol)}`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data.success ? { ask: data.ask, bid: data.bid } : null;
+    } catch (e) {
+      logger.error({ err: e }, 'MT5 price fetch failed');
+      return null;
+    }
+  }
 }

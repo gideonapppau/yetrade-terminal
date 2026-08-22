@@ -139,18 +139,40 @@ export function SignalsPage() {
           </div>
           
           <button 
-            onClick={() => {
+            onClick={async () => {
               const service = useTelegramStore.getState().service;
-              if (service) {
-                service.handleNewMessage({
-                  messageId: Date.now().toString(),
-                  channelId: "12345",
-                  text: "BTCUSDm BUY\nENTRY: 76000\nSL: 70000\nTP: 80000",
-                  timestamp: new Date()
-                });
-              } else {
+              const mt5 = useMT5Store.getState();
+              
+              if (!service) {
                 toast.error("Telegram service not connected.");
+                return;
               }
+              
+              if (!mt5.isConnected || !mt5.adapter.getSymbolPrice) {
+                toast.error("MT5 not connected. Please connect broker to simulate live trades.");
+                return;
+              }
+              
+              const toastId = toast.loading("Fetching live market price...");
+              const symbol = "BTCUSDm";
+              const price = await mt5.adapter.getSymbolPrice(symbol);
+              toast.dismiss(toastId);
+              
+              if (!price) {
+                toast.error(`Failed to fetch live price for ${symbol}.`);
+                return;
+              }
+              
+              const entry = price.ask;
+              const sl = entry - 1000;
+              const tp = entry + 2000; // Ensures an RR of 2.0 to pass Risk Engine checks
+
+              service.handleNewMessage({
+                messageId: Date.now().toString(),
+                channelId: "12345",
+                text: `${symbol} BUY\nENTRY: ${entry.toFixed(2)}\nSL: ${sl.toFixed(2)}\nTP: ${tp.toFixed(2)}`,
+                timestamp: new Date()
+              });
             }}
             className="px-4 py-1.5 bg-accent/10 text-accent border border-accent/20 rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-all flex items-center gap-2"
           >
