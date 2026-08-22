@@ -81,11 +81,20 @@ export function SettingsPage() {
   const [newChannelName, setNewChannelName] = useState("")
 
   const mt5 = useMT5Store()
-  const [brokerLogin, setBrokerLogin] = useState("")
-  const [brokerPassword, setBrokerPassword] = useState("")
-  const [selectedBroker, setSelectedBroker] = useState("Exness")
-  const [brokerServer, setBrokerServer] = useState(COMMON_BROKERS["Exness"][0])
-  const [mt5Path, setMt5Path] = useState("")
+  const initialBrokerServer = executionSettings.mt5Server || COMMON_BROKERS["Exness"][0];
+  let initialSelectedBroker = "Custom";
+  for (const [broker, servers] of Object.entries(COMMON_BROKERS)) {
+    if (servers.includes(initialBrokerServer)) {
+      initialSelectedBroker = broker;
+      break;
+    }
+  }
+
+  const [brokerLogin, setBrokerLogin] = useState(executionSettings.mt5Login || "")
+  const [brokerPassword, setBrokerPassword] = useState(executionSettings.mt5Password || "")
+  const [selectedBroker, setSelectedBroker] = useState(initialSelectedBroker)
+  const [brokerServer, setBrokerServer] = useState(initialBrokerServer)
+  const [mt5Path, setMt5Path] = useState(executionSettings.mt5Path || "")
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [loginError, setLoginError] = useState("")
   const [bridgeUrlInput, setBridgeUrlInput] = useState(executionSettings.bridgeUrl)
@@ -103,7 +112,12 @@ export function SettingsPage() {
     if (!res.success) {
       setLoginError(res.message)
     } else {
-      setBrokerPassword("") // clear password on success
+      setExecutionSettings({
+        mt5Login: brokerLogin,
+        mt5Password: brokerPassword,
+        mt5Server: brokerServer,
+        mt5Path: mt5Path
+      });
     }
   }
 

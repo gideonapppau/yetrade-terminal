@@ -9,6 +9,7 @@ interface DashboardLayoutProps {
   children: React.ReactNode
   activePage: string
   onPageChange: (page: string) => void
+  onOpenCommandPalette?: () => void
 }
 
 function formatTimeAgo(ts: number): string {
@@ -20,7 +21,7 @@ function formatTimeAgo(ts: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function DashboardLayout({ children, activePage, onPageChange }: DashboardLayoutProps) {
+export function DashboardLayout({ children, activePage, onPageChange, onOpenCommandPalette }: DashboardLayoutProps) {
   const { connectionState, profile, logout, client } = useTelegramStore();
   const mt5Connected = useMT5Store((s) => s.isConnected);
   const tradingPaused = useSettingsStore((s) => s.tradingPaused);

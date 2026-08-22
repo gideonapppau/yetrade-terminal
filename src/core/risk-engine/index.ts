@@ -2,7 +2,6 @@ import type { AccountState, RiskConfiguration, RiskEvaluationResult, RuleResult 
 import type { ParsedSignal } from '../signal-engine/types';
 import { logger } from '../logger';
 import {
-  MOCK_TICK_VALUE_PER_LOT,
   MIN_POSITION_SIZE_LOTS,
   POSITION_SIZE_DECIMALS,
 } from '../constants';
@@ -13,7 +12,7 @@ export class RiskEngine {
     signal: ParsedSignal,
     account: AccountState,
     config: RiskConfiguration,
-    tickValuePerLot: number = MOCK_TICK_VALUE_PER_LOT
+    symbolInfo?: { trade_tick_value: number; trade_tick_size: number; }
   ): RiskEvaluationResult {
     
     logger.info({ symbol: signal.symbol }, 'Starting risk evaluation');
@@ -101,7 +100,14 @@ export class RiskEngine {
       // This varies drastically by broker/instrument, using a simplified version for Phase 1
       const stopDistance = Math.abs(signal.entry - signal.stopLoss);
       if (stopDistance > 0) {
-        positionSize = riskAmount / (stopDistance * tickValuePerLot);
+        if (symbolInfo && symbolInfo.trade_tick_size > 0 && symbolInfo.trade_tick_value > 0) {
+          const ticksAtRisk = stopDistance / symbolInfo.trade_tick_size;
+          const monetaryRiskPerLot = ticksAtRisk * symbolInfo.trade_tick_value;
+          positionSize = riskAmount / monetaryRiskPerLot;
+        } else {
+          // Fallback if symbol info is missing (e.g. testing)
+          positionSize = riskAmount / (stopDistance * 10);
+        }
         const scale = Math.pow(10, POSITION_SIZE_DECIMALS);
         positionSize = Math.max(MIN_POSITION_SIZE_LOTS, Math.round(positionSize * scale) / scale);
       } else {

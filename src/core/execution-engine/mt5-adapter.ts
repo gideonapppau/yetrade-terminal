@@ -119,4 +119,21 @@ export class MT5Adapter implements BrokerAdapter {
       return null;
     }
   }
+
+  async getSymbolInfo(symbol: string): Promise<{ trade_tick_value: number; trade_tick_size: number; trade_contract_size: number; point: number } | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/symbol_info?symbol=${encodeURIComponent(symbol)}`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data.success ? {
+        trade_tick_value: data.trade_tick_value,
+        trade_tick_size: data.trade_tick_size,
+        trade_contract_size: data.trade_contract_size,
+        point: data.point
+      } : null;
+    } catch (e) {
+      logger.error({ err: e }, 'MT5 symbol info fetch failed');
+      return null;
+    }
+  }
 }

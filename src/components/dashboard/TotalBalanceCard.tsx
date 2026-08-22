@@ -16,8 +16,8 @@ export function TotalBalanceCard() {
   const modeColor = tradeMode === 2 ? 'bg-success/15 text-success border-success/30' : 'bg-warning/15 text-warning border-warning/30';
 
   const handleWalletAction = (action: string) => {
-    toast.info(`${action} via your broker`, {
-      description: "Funding is managed through your MetaTrader 5 terminal or broker portal.",
+    toast.info(`${action} is managed via your broker`, {
+      description: "This feature is handled directly through your MetaTrader 5 terminal or broker portal.",
     });
   };
   return (
@@ -82,7 +82,7 @@ export function TotalBalanceCard() {
         <motion.button 
           whileHover={{ scale: 1.02 }} 
           whileTap={{ scale: 0.98 }}
-          onClick={() => handleWalletAction("Transfers are")}
+          onClick={() => handleWalletAction("Transferring funds")}
           className="bg-elevated hover:bg-background border border-border text-primary font-medium py-3 rounded-full flex items-center justify-center gap-2 transition-colors"
         >
           <Repeat size={16} /> Transfer
@@ -90,7 +90,7 @@ export function TotalBalanceCard() {
         <motion.button 
           whileHover={{ scale: 1.02 }} 
           whileTap={{ scale: 0.98 }}
-          onClick={() => handleWalletAction("Currency swaps are")}
+          onClick={() => handleWalletAction("Currency swapping")}
           className="bg-elevated hover:bg-background border border-border text-primary font-medium py-3 rounded-full flex items-center justify-center gap-2 transition-colors"
         >
           <Shuffle size={16} /> Swap

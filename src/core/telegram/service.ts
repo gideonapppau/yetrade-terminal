@@ -140,7 +140,18 @@ export class TelegramService {
             tradesExecutedToday: channelTodaySignals.length,
           };
 
-          const riskEvaluation = paused ? null : this.riskEngine.evaluate(parsed, account, effectiveRiskConfig);
+          let symbolInfo = undefined;
+          if (mt5.isConnected && !paused) {
+            const info = await mt5.adapter.getSymbolInfo(parsed.symbol);
+            if (info) {
+              symbolInfo = {
+                trade_tick_value: info.trade_tick_value,
+                trade_tick_size: info.trade_tick_size,
+              };
+            }
+          }
+
+          const riskEvaluation = paused ? null : this.riskEngine.evaluate(parsed, account, effectiveRiskConfig, symbolInfo);
           let executed = false;
 
           if (paused) {

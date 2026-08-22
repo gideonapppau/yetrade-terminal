@@ -54,9 +54,28 @@ export const useMT5Store = create<MT5State>((set, get) => ({
 
   init: async () => {
     set({ isConnecting: true });
-    const { adapter, syncAccountInfo } = get();
+    const { adapter, syncAccountInfo, loginBroker } = get();
     
-    const connected = await adapter.isConnected();
+    let connected = await adapter.isConnected();
+    
+    if (!connected) {
+       // Attempt auto-login with saved credentials
+       const settings = useSettingsStore.getState().executionSettings;
+       if (settings.mt5Login && settings.mt5Password && settings.mt5Server) {
+          try {
+             const res = await loginBroker({
+               login: settings.mt5Login,
+               password: settings.mt5Password,
+               server: settings.mt5Server,
+               path: settings.mt5Path
+             });
+             connected = res.success;
+          } catch (e) {
+             console.error("Auto-login failed:", e);
+          }
+       }
+    }
+
     if (connected) {
       set({ isConnected: true, isConnecting: false });
       await syncAccountInfo();

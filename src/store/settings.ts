@@ -13,6 +13,10 @@ export interface GeneralSettings {
 
 export interface ExecutionSettings {
   bridgeUrl: string;
+  mt5Login?: string;
+  mt5Password?: string;
+  mt5Server?: string;
+  mt5Path?: string;
   twinTradingEnabled: boolean;
   maxTpsToSplit: string;
   riskDistribution: string;

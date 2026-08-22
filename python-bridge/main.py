@@ -146,6 +146,27 @@ def get_price():
         "last": tick.last
     })
 
+@app.route("/symbol_info", methods=["GET"])
+def get_symbol_info():
+    symbol = request.args.get("symbol")
+    if not symbol:
+        return jsonify({"success": False, "message": "Missing symbol"}), 400
+        
+    if not mt5.symbol_select(symbol, True):
+        return jsonify({"success": False, "message": f"Symbol {symbol} not found"}), 400
+        
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        return jsonify({"success": False, "message": "Failed to get symbol info"}), 400
+        
+    return jsonify({
+        "success": True,
+        "trade_tick_value": info.trade_tick_value,
+        "trade_tick_size": info.trade_tick_size,
+        "trade_contract_size": info.trade_contract_size,
+        "point": info.point
+    })
+
 @app.route("/trade/execute", methods=["POST"])
 def execute_trade():
     trade = request.json

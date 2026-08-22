@@ -1,83 +1,182 @@
-# YetTrade: Automated Trading Terminal
+<div align="center">
 
-**YetTrade** is a powerful, open-source automated trading solution designed to bridge the gap between market signals and execution. It seamlessly connects Telegram signal channels directly to your MetaTrader 5 (MT5) broker account, ensuring you never miss a trading opportunity while maintaining complete control over your risk and strategy.
+# Gideon Appau
 
-## Why YetTrade? (For Managers & Traders)
+### Full-Stack Software Engineer
 
-In the fast-paced world of trading, speed and reliability are everything. YetTrade automates the manual process of reading a signal from Telegram and typing it into a trading platform. 
+Building web, mobile, and backend systems with TypeScript, Go, Python, and React.
 
-*   **Lightning Fast Execution:** By removing human delay, trades are entered the second a signal is broadcast.
-*   **Total Data Privacy:** There are no third-party cloud servers. Your account credentials, trading history, and API keys stay exclusively on your local computer.
-*   **Automated Risk Management:** Set your comfort level once (e.g., risk 1% of total capital per trade), and the system automatically calculates the exact position size for every trade.
-*   **Custom Control:** Fine-tune risk settings on a per-channel basis. Some signal providers are riskier than others; YetTrade lets you adjust accordingly.
+[![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/gideonapppau)
+[![X](https://img.shields.io/badge/X-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/)
+[![TikTok](https://img.shields.io/badge/TikTok-000000?style=for-the-badge&logo=tiktok&logoColor=white)](https://www.tiktok.com/)
 
-## How It Works (The Architecture)
-
-YetTrade is built on modern, secure technologies, split into three synchronized parts:
-
-1.  **The Command Center (Frontend Desktop App):** Built with React and Tauri (Rust), this is the beautiful desktop interface where you manage settings, view active trades, and monitor performance. It's incredibly fast and uses minimal system resources.
-2.  **The Secure Vault (Local Database):** Powered by SQLite, this locally stores your configuration and trade logs. Nothing is sent to the cloud, ensuring maximum security and compliance.
-3.  **The Execution Engine (Python Bridge):** A dedicated background service that acts as a secure translator between the Command Center and your MetaTrader 5 terminal, instantly executing the parsed trades.
+</div>
 
 ---
 
-## Technical Setup (For Engineers)
+## About
 
-### Prerequisites
+I'm a full-stack software engineer with 3+ years of experience building applications across web, mobile, backend, and automation.
 
-Since YetTrade communicates directly with MetaTrader 5, it must be run on a **Windows** operating system.
+I work primarily with TypeScript, Go, Python, React, Next.js, React Native, Node.js, and PostgreSQL. I'm particularly interested in backend architecture, product engineering, automation, and systems that have to work reliably outside of a demo environment.
 
-Please ensure the following are installed:
-1.  [Node.js](https://nodejs.org/en/) (v18 or higher)
-2.  [Rust](https://rustup.rs/) (latest stable release)
-3.  [Python](https://www.python.org/downloads/) (3.10 or higher)
-4.  **MetaTrader 5 Desktop Terminal** (installed and currently running)
+My current focus is **YETSO**, a social discovery product built around conversation and progressive identity reveal.
 
-### Step 1: Initialize the Execution Engine (Python Bridge)
-
-The Python Bridge is the critical link to MT5. Open your terminal and run:
-
-```bash
-cd python-bridge
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
-```
-*(The engine will start running locally at `http://127.0.0.1:8000`)*
-
-### Step 2: Launch the Command Center (Desktop App)
-
-Open a new, separate terminal window at the root of the project:
-
-```bash
-# Install the required interface dependencies
-npm install
-
-# Build and start the desktop application
-npm run tauri dev
-```
-
-### Step 3: Configure and Connect
-
-Once the application window appears:
-1.  Navigate to **Settings > Telegram Connection** and authenticate using your `api_id` and `api_hash` (obtainable from my.telegram.org).
-2.  Navigate to **Settings > MetaTrader 5** and securely input your broker login credentials.
-3.  Select the specific Telegram channels you wish the terminal to monitor for trade signals.
+Outside of software, I spend time on photography, cinematography, storytelling, music, and exploring financial markets.
 
 ---
 
-## Future Roadmap (V2)
+## Currently Building
 
-We are actively building the foundation for advanced trade management, including:
-*   **Twin Trading:** Splitting positions to secure partial profits.
-*   **Trailing Stops:** Automatically locking in gains as the market moves favorably.
-*   **Historical Replays:** Backtesting signal providers against historical data to verify profitability before risking real capital.
+### YETSO
 
-## Contributing
+**You haven't met them yet. So find out.**
 
-We welcome contributions from developers and traders alike! If you're interested in helping us build the future of automated retail trading, check out the `v2_roadmap.md` file in the repository root.
+YETSO is a social discovery platform built around a simple idea: people should have an opportunity to interact before a profile gives them a reason to make a decision.
 
-## License
+Instead of starting with photos, bios, and swipe decisions, YETSO introduces people progressively through conversation and controlled identity reveal.
 
-This project is open-source and licensed under the MIT License.
+The product is designed around:
+
+- Progressive identity reveal
+- Conversation-first discovery
+- Time-boxed interactions
+- Anonymous interaction
+- Smart matching and queueing
+- Connection windows
+- Deliberate transitions from anonymity to identity
+
+YETSO is currently my primary product focus.
+
+---
+
+## What I Work With
+
+### Languages
+
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E.svg?style=for-the-badge&logo=javascript&logoColor=black)
+![Go](https://img.shields.io/badge/Go-00ADD8.svg?style=for-the-badge&logo=go&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB.svg?style=for-the-badge&logo=python&logoColor=white)
+
+### Frontend & Mobile
+
+![React](https://img.shields.io/badge/React-20232A.svg?style=for-the-badge&logo=react&logoColor=61DAFB)
+![React Native](https://img.shields.io/badge/React_Native-20232A.svg?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Next.js](https://img.shields.io/badge/Next.js-000000.svg?style=for-the-badge&logo=next.js&logoColor=white)
+![Angular](https://img.shields.io/badge/Angular-DD0031.svg?style=for-the-badge&logo=angular&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4.svg?style=for-the-badge&logo=tailwindcss&logoColor=white)
+
+### Backend
+
+![Node.js](https://img.shields.io/badge/Node.js-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)
+![Go](https://img.shields.io/badge/Go-00ADD8.svg?style=for-the-badge&logo=go&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB.svg?style=for-the-badge&logo=python&logoColor=white)
+![JWT](https://img.shields.io/badge/JWT-000000.svg?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
+
+### Databases & Infrastructure
+
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1.svg?style=for-the-badge&logo=postgresql&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-47A248.svg?style=for-the-badge&logo=mongodb&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-DC382D.svg?style=for-the-badge&logo=redis&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-003B57.svg?style=for-the-badge&logo=sqlite&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED.svg?style=for-the-badge&logo=docker&logoColor=white)
+
+### Desktop, Cloud & Tooling
+
+![Tauri](https://img.shields.io/badge/Tauri-24C8DB.svg?style=for-the-badge&logo=tauri&logoColor=white)
+![Render](https://img.shields.io/badge/Render-46E3B7.svg?style=for-the-badge&logo=render&logoColor=black)
+![Netlify](https://img.shields.io/badge/Netlify-00C7B7.svg?style=for-the-badge&logo=netlify&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF.svg?style=for-the-badge&logo=github-actions&logoColor=white)
+![Git](https://img.shields.io/badge/Git-F05032.svg?style=for-the-badge&logo=git&logoColor=white)
+![Figma](https://img.shields.io/badge/Figma-F24E1E.svg?style=for-the-badge&logo=figma&logoColor=white)
+![Jest](https://img.shields.io/badge/Jest-C21325.svg?style=for-the-badge&logo=jest&logoColor=white)
+
+---
+
+## Engineering Interests
+
+- Backend and API design
+- Distributed systems
+- Event-driven architecture
+- Automation
+- AI-assisted applications
+- Product engineering
+- Offline-first software
+- Developer tooling
+- Data-intensive applications
+- Trading and financial technology
+
+---
+
+## GitHub Statistics
+
+<p align="center">
+  <img src="https://github-readme-stats.shion.dev/api?username=gideonapppau&theme=ambient_gradient&hide_border=true&include_all_commits=true&count_private=true" height="165" />
+  <img src="https://github-readme-stats.shion.dev/api/top-langs/?username=gideonapppau&theme=ambient_gradient&hide_border=true&include_all_commits=true&count_private=true&layout=compact" height="165" />
+</p>
+
+<p align="center">
+  <img src="https://streak-stats.demolab.com/?user=gideonapppau&theme=ambient_gradient&hide_border=true" />
+</p>
+
+---
+
+## GitHub Trophies
+
+<p align="center">
+  <img src="https://github-profile-trophy.vercel.app/?username=gideonapppau&theme=radical&no-frame=false&no-bg=true&margin-w=4" />
+</p>
+
+---
+
+## Activity
+
+<p align="center">
+  <img src="https://github-readme-activity-graph.vercel.app/graph?username=gideonapppau&theme=react-dark&hide_border=true" />
+</p>
+
+---
+
+## Profile Views
+
+<p align="center">
+  <img src="https://komarev.com/ghpvc/?username=gideonapppau&label=Profile%20Views&color=13&style=for-the-badge" />
+</p>
+
+---
+
+## Beyond Software
+
+Photography, cinematography, storytelling, music, and financial markets are the other areas I spend time learning and creating in.
+
+---
+
+## Connect
+
+<p align="center">
+  <a href="https://x.com/">
+    <img src="https://img.shields.io/badge/X-000000.svg?style=for-the-badge&logo=x&logoColor=white" />
+  </a>
+  <a href="https://www.tiktok.com/">
+    <img src="https://img.shields.io/badge/TikTok-000000.svg?style=for-the-badge&logo=tiktok&logoColor=white" />
+  </a>
+  <a href="https://youtube.com/">
+    <img src="https://img.shields.io/badge/YouTube-FF0000.svg?style=for-the-badge&logo=youtube&logoColor=white" />
+  </a>
+</p>
+
+---
+
+## Random Dev Quote
+
+<p align="center">
+  <img src="https://quotes-github-readme.vercel.app/api?type=horizontal&theme=radical" />
+</p>
+
+---
+
+<p align="center">
+  <sub>© Gideon Appau</sub>
+</p>
