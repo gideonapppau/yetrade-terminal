@@ -51,6 +51,40 @@ function App() {
     return () => window.removeEventListener('mock_trade_closed', loadDashboardTrades);
   }, [loadDashboardTrades]);
 
+  // Monitor trades: if an OPEN trade in DB is missing from MT5 positions, mark it as closed
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const mt5 = useMT5Store.getState();
+        if (!mt5.isConnected || !mt5.adapter || typeof mt5.adapter.getOpenPositions !== 'function') return;
+
+        const db = await getDb();
+        const openTradesInDb = await db.select().from(trades).where(eq(trades.status, 'OPEN'));
+        if (openTradesInDb.length === 0) return;
+
+        const openPositions = await mt5.adapter.getOpenPositions();
+        const openTickets = new Set(openPositions.map((p: any) => String(p.ticket)));
+        
+        let changed = false;
+        for (const t of openTradesInDb) {
+          if (!openTickets.has(t.id)) {
+            // Missing from MT5 open positions -> it closed
+            await db.update(trades)
+              .set({ status: 'CLOSED_WIN' }) // Simplify result for MVP
+              .where(eq(trades.id, t.id));
+            changed = true;
+          }
+        }
+        if (changed) {
+          loadDashboardTrades();
+        }
+      } catch (err) {
+        console.error("Trade monitor error:", err);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [loadDashboardTrades]);
+
   // Map signal IDs to receive timestamps so the history has real dates
   const [signalTimes, setSignalTimes] = useState<Map<string, number>>(new Map());
   useEffect(() => {
