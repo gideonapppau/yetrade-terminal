@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 export interface UiSignal {
   id: string;
@@ -23,13 +24,20 @@ interface SignalState {
   clearSignals: () => void;
 }
 
-export const useSignalStore = create<SignalState>((set) => ({
-  signals: [],
-  addSignal: (signal) =>
-    set((state) =>
-      state.signals.some((s) => s.id === signal.id)
-        ? state
-        : { signals: [signal, ...state.signals] }
-    ),
-  clearSignals: () => set({ signals: [] }),
-}));
+export const useSignalStore = create<SignalState>()(
+  persist(
+    (set) => ({
+      signals: [],
+      addSignal: (signal) =>
+        set((state) =>
+          state.signals.some((s) => s.id === signal.id)
+            ? state
+            : { signals: [signal, ...state.signals] }
+        ),
+      clearSignals: () => set({ signals: [] }),
+    }),
+    {
+      name: 'yettrade-signals-storage',
+    }
+  )
+);
