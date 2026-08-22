@@ -202,7 +202,6 @@ export function SignalsPage() {
                 <td colSpan={9} className="py-24">
                   <div className="flex flex-col items-center justify-center text-center">
                     <div className="w-16 h-16 bg-elevated rounded-full flex items-center justify-center text-secondary mb-4 shadow-sm relative">
-                      <div className="absolute inset-0 rounded-full border-2 border-accent/20 animate-ping" style={{ animationDuration: '3s' }}></div>
                       <Activity size={24} />
                     </div>
                     <h4 className="text-lg font-medium mb-2">
