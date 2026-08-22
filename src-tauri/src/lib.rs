@@ -2,11 +2,10 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  let migrations = vec![
-    Migration {
-      version: 1,
-      description: "create_initial_tables",
-      sql: "
+    let migrations = vec![Migration {
+        version: 1,
+        description: "create_initial_tables",
+        sql: "
         CREATE TABLE IF NOT EXISTS workspaces (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
@@ -43,26 +42,26 @@ pub fn run() {
           status TEXT NOT NULL
         );
       ",
-      kind: MigrationKind::Up,
-    },
-  ];
+        kind: MigrationKind::Up,
+    }];
 
-  tauri::Builder::default()
-    .plugin(
-      tauri_plugin_sql::Builder::default()
-        .add_migrations("sqlite:trading-terminal.db", migrations)
-        .build(),
-    )
-    .setup(|app| {
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
-      Ok(())
-    })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(
+            tauri_plugin_sql::Builder::default()
+                .add_migrations("sqlite:trading-terminal.db", migrations)
+                .build(),
+        )
+        .setup(|app| {
+            if cfg!(debug_assertions) {
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .build(),
+                )?;
+            }
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

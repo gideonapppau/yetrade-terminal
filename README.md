@@ -34,16 +34,45 @@ To ensure maximum performance and security, the application is constructed using
 
 ## System Requirements
 
+### Prerequisites
 * **Operating System:** Windows (Required for MetaTrader 5 compatibility)
 * **Trading Platform:** MetaTrader 5 Terminal installed and running
-* **Background Dependencies:** Python 3.10 or higher
-* **Application Dependencies:** Node.js (v18+) and Rust (for building the application from source)
+* **Node.js:** v18 or higher
+* **Rust:** Required for Tauri compilation ([Install Rust](https://rustup.rs/))
+* **Python:** 3.10 or higher (for the MT5 bridge)
 
-## Deployment Instructions
+## Developer Setup & Installation
 
-1. **Install Dependencies:** Download the required software libraries for the interface.
-2. **Initialize the Execution Layer:** Start the Python bridge to establish the connection to the MT5 platform.
-3. **Launch the Terminal:** Start the desktop application to access the dashboard and configure trading parameters.
+Follow these steps to run the application locally for development.
+
+### 1. Install Frontend Dependencies
+Open a terminal in the root directory and install the Node.js packages:
+```bash
+npm install
+```
+
+### 2. Setup the Python Bridge
+The terminal communicates with MetaTrader 5 via a Python backend. You must install the required Python packages.
+```bash
+cd python-bridge
+pip install -r requirements.txt
+# Alternatively, install MetaTrader5 and Flask manually:
+# pip install MetaTrader5 Flask flask-cors
+```
+
+### 3. Run the Application
+The application can automatically start the Python bridge if configured in the Settings. To run the full desktop application in development mode:
+```bash
+npm run tauri dev
+```
+*(Note: The first time you run this, Rust will compile the desktop shell, which may take several minutes.)*
+
+### 4. Build for Production
+To compile the application into a standalone Windows executable (`.exe`):
+```bash
+npm run tauri build
+```
+The compiled executable will be located in `src-tauri/target/release/`.
 
 ## License
 MIT

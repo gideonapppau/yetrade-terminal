@@ -20,6 +20,7 @@ import { EquityChartCard } from "./components/dashboard/EquityChartCard"
 import { SignalsPage } from "./pages/SignalsPage"
 import { RiskPage } from "./pages/RiskPage"
 import { SettingsPage } from "./pages/SettingsPage"
+import { useSettingsStore } from "./store/settings"
 
 type HistoryFilter = 'ALL' | 'CLOSED_WIN' | 'CLOSED_LOSS'
 
@@ -53,7 +54,7 @@ function App() {
     return () => window.removeEventListener('mock_trade_closed', loadDashboardTrades);
   }, [loadDashboardTrades]);
 
-  // Monitor trades: if an OPEN trade in DB is missing from MT5 positions, mark it as closed
+  // Monitor trades and automate management (Breakeven/Trailing)
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -68,14 +69,23 @@ function App() {
 
         const openPositions = await mt5.adapter.getOpenPositions();
         const openTickets = new Set(openPositions.map((p: any) => String(p.ticket)));
-        
+
         const newProfits: Record<string, number> = {};
         for (const p of openPositions) {
           newProfits[String(p.ticket)] = p.profit;
         }
         mt5.setLiveProfits(newProfits);
-        
+
         let changed = false;
+
+        // Handle Trade Automation (Breakeven / Trailing)
+        const settings = useSettingsStore.getState().executionSettings;
+        const autoBreakeven = settings.autoBreakEvenEnabled;
+        const trailingStop = settings.trailingStopEnabled;
+        const beTrigger = parseFloat(settings.autoBreakEvenTrigger) || 0;
+        const tsTrigger = settings.trailingStopTriggerPips || 0;
+        const tsDistance = settings.trailingStopDistancePips || 0;
+
         for (const t of openTradesInDb) {
           if (!openTickets.has(t.id)) {
             // Missing from MT5 open positions -> it closed
@@ -83,6 +93,42 @@ function App() {
               .set({ status: 'CLOSED_WIN' }) // Simplify result for MVP
               .where(eq(trades.id, t.id));
             changed = true;
+          } else if (autoBreakeven || trailingStop) {
+            // Look up the live position
+            const pos = openPositions.find((p: any) => String(p.ticket) === t.id);
+            if (pos && typeof mt5.adapter.modifyTrade === 'function' && t.entryPrice) {
+              const symbolInfo = await mt5.adapter.getSymbolInfo(pos.symbol);
+              if (symbolInfo) {
+                const point = symbolInfo.point || 0.00001;
+                const isBuy = pos.type === 'BUY';
+                const currentPrice = pos.price_current;
+                const entryPrice = t.entryPrice;
+                const currentSl = pos.sl;
+
+                // Distance in points
+                const profitPoints = isBuy ? (currentPrice - entryPrice) / point : (entryPrice - currentPrice) / point;
+                let newSl = currentSl;
+
+                // 1. Trailing Stop
+                if (trailingStop && tsTrigger > 0 && tsDistance > 0 && profitPoints >= tsTrigger) {
+                  const candidateSl = isBuy ? currentPrice - (tsDistance * point) : currentPrice + (tsDistance * point);
+                  // Move SL only if it's better than current SL
+                  if (isBuy && candidateSl > currentSl) newSl = candidateSl;
+                  if (!isBuy && (currentSl === 0 || candidateSl < currentSl)) newSl = candidateSl;
+                }
+                // 2. Breakeven
+                else if (autoBreakeven && beTrigger > 0 && profitPoints >= beTrigger) {
+                  // Just set to entry price (maybe + a few points for spread, but just entry for MVP)
+                  if (isBuy && currentSl < entryPrice) newSl = entryPrice;
+                  if (!isBuy && (currentSl === 0 || currentSl > entryPrice)) newSl = entryPrice;
+                }
+
+                // Apply modification
+                if (newSl !== currentSl && Math.abs(newSl - currentSl) > point) {
+                  await mt5.adapter.modifyTrade(pos.ticket, newSl, pos.tp);
+                }
+              }
+            }
           }
         }
         if (changed) {
@@ -162,6 +208,28 @@ function App() {
     toast.success(`Exported ${filteredHistory.length} trade${filteredHistory.length === 1 ? '' : 's'}`);
   };
 
+  const handleCloseTrade = async (ticket: string) => {
+    const mt5 = useMT5Store.getState();
+    if (!mt5.isConnected || !mt5.adapter) {
+      toast.error("MT5 is not connected");
+      return;
+    }
+
+    toast.promise(
+      mt5.adapter.closeTrade(ticket).then(async (res) => {
+        if (!res.success) throw new Error(res.message);
+        // Force refresh
+        setTimeout(() => loadDashboardTrades(), 1000);
+        return res;
+      }),
+      {
+        loading: 'Closing position...',
+        success: 'Position closed successfully',
+        error: (err) => `Failed to close: ${err.message || 'Unknown error'}`
+      }
+    );
+  };
+
   // Initialize service when client is ready
   useEffect(() => {
     if (client && !service) {
@@ -177,7 +245,7 @@ function App() {
     if (config?.sessionString && !client && connectionState !== 'CONNECTING' && connectionState !== 'OFFLINE' && connectionState !== 'ERROR') {
       if (isConnecting.current) return;
       isConnecting.current = true;
-      
+
       const initClient = async () => {
         try {
           if (!navigator.onLine) {
@@ -264,7 +332,7 @@ function App() {
         <div className="bg-elevated p-8 rounded-2xl max-w-md w-full border border-border text-center">
           <div className="w-16 h-16 bg-accent/20 rounded-full flex items-center justify-center mx-auto mb-6">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-accent">
-              <path d="M2 2l20 20M8.5 8.5a5 5 0 017 0M5 5a10 10 0 0114 0M12 12a1 1 0 010 0M12 20v.01"/>
+              <path d="M2 2l20 20M8.5 8.5a5 5 0 017 0M5 5a10 10 0 0114 0M12 12a1 1 0 010 0M12 20v.01" />
             </svg>
           </div>
           <h2 className="text-xl font-bold mb-2">You are offline</h2>
@@ -325,22 +393,22 @@ function App() {
                         {openTrades.map((t: any) => {
                           const profit = liveProfits[t.id];
                           return (
-                            <motion.div 
+                            <motion.div
                               layout
                               initial={{ opacity: 0, x: -20, scale: 0.95 }}
                               animate={{ opacity: 1, x: 0, scale: 1 }}
                               exit={{ opacity: 0, x: 20, scale: 0.95 }}
                               transition={{ duration: 0.2 }}
-                              key={t.id} 
-                              className="flex items-center justify-between p-2.5 rounded-lg border border-border bg-surface/50"
+                              key={t.id}
+                              className="group relative flex items-center justify-between p-2.5 rounded-lg border border-border bg-surface/50 overflow-hidden"
                             >
                               <div className="min-w-0">
                                 <div className="text-sm font-medium truncate">{t.symbol}</div>
                                 <div className="text-[10px] text-secondary font-mono">{t.id}</div>
                               </div>
-                              <div className="text-right shrink-0 ml-2">
+                              <div className="text-right shrink-0 ml-2 group-hover:opacity-0 transition-opacity duration-200">
                                 {profit !== undefined ? (
-                                  <motion.div 
+                                  <motion.div
                                     key={profit}
                                     initial={{ scale: 1.1, color: profit >= 0 ? '#10b981' : '#ef4444' }}
                                     animate={{ scale: 1, color: profit >= 0 ? 'currentColor' : 'currentColor' }}
@@ -354,6 +422,15 @@ function App() {
                                   </span>
                                 )}
                                 <div className="text-[10px] text-secondary mt-0.5 tabular-nums">{t.volume} lots</div>
+                              </div>
+
+                              <div className="absolute inset-y-0 right-0 flex items-center pr-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                <button
+                                  onClick={() => handleCloseTrade(t.id)}
+                                  className="bg-destructive text-destructive-foreground px-3 py-1.5 rounded-md text-xs font-bold shadow-sm hover:bg-destructive/90 transition-colors"
+                                >
+                                  Close
+                                </button>
                               </div>
                             </motion.div>
                           )
@@ -403,7 +480,7 @@ function App() {
                   <tbody className="divide-y divide-border">
                     <AnimatePresence mode="popLayout">
                       {filteredHistory.length === 0 ? (
-                        <motion.tr 
+                        <motion.tr
                           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                           key="empty-history"
                         >
@@ -425,12 +502,12 @@ function App() {
                         </motion.tr>
                       ) : (
                         filteredHistory.map((t: any) => (
-                          <motion.tr 
+                          <motion.tr
                             layout
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0 }}
-                            key={t.id} 
+                            key={t.id}
                             className="group hover:bg-elevated/40 transition-colors"
                           >
                             <td className="py-3 font-mono text-xs text-secondary max-w-[140px] truncate">{t.id}</td>

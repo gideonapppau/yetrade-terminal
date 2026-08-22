@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { MT5Adapter } from '../core/execution-engine/mt5-adapter';
 import { useSettingsStore } from './settings';
+import { Command } from '@tauri-apps/plugin-shell';
 
 interface MT5State {
   isConnected: boolean;
@@ -57,6 +58,23 @@ export const useMT5Store = create<MT5State>((set, get) => ({
     const { adapter, syncAccountInfo, loginBroker } = get();
     
     let connected = await adapter.isConnected();
+    
+    if (!connected && useSettingsStore.getState().generalSettings.autoStartBridge) {
+       try {
+         console.log("Attempting to auto-start Python Bridge...");
+         const command = Command.create('python', ['python-bridge/main.py']);
+         command.on('error', error => console.error(`Python bridge command error: "${error}"`));
+         
+         const child = await command.spawn();
+         console.log('Python bridge started with PID:', child.pid);
+         
+         // Wait a moment for the server to bind
+         await new Promise(resolve => setTimeout(resolve, 2000));
+         connected = await adapter.isConnected();
+       } catch (err) {
+         console.error('Failed to spawn Python bridge', err);
+       }
+    }
     
     if (!connected) {
        // Attempt auto-login with saved credentials

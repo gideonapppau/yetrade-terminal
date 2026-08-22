@@ -120,7 +120,7 @@ export class MT5Adapter implements BrokerAdapter {
     }
   }
 
-  async getSymbolInfo(symbol: string): Promise<{ trade_tick_value: number; trade_tick_size: number; trade_contract_size: number; point: number } | null> {
+  async getSymbolInfo(symbol: string): Promise<{ trade_tick_value: number; trade_tick_size: number; trade_contract_size: number; volume_min: number; volume_step: number; point: number } | null> {
     try {
       const response = await fetch(`${this.baseUrl}/symbol_info?symbol=${encodeURIComponent(symbol)}`);
       if (!response.ok) return null;
@@ -129,11 +129,41 @@ export class MT5Adapter implements BrokerAdapter {
         trade_tick_value: data.trade_tick_value,
         trade_tick_size: data.trade_tick_size,
         trade_contract_size: data.trade_contract_size,
+        volume_min: data.volume_min,
+        volume_step: data.volume_step,
         point: data.point
       } : null;
     } catch (e) {
       logger.error({ err: e }, 'MT5 symbol info fetch failed');
       return null;
+    }
+  }
+
+  async closeTrade(ticket: string | number): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/trade/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket: Number(ticket) }),
+      });
+      return await response.json();
+    } catch (e) {
+      logger.error({ err: e, ticket }, 'MT5 trade close failed');
+      return { success: false, message: 'Bridge disconnected' };
+    }
+  }
+
+  async modifyTrade(ticket: string | number, sl?: number, tp?: number): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/trade/modify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket: Number(ticket), sl, tp }),
+      });
+      return await response.json();
+    } catch (e) {
+      logger.error({ err: e, ticket }, 'MT5 trade modify failed');
+      return { success: false, message: 'Bridge disconnected' };
     }
   }
 }

@@ -164,6 +164,8 @@ def get_symbol_info():
         "trade_tick_value": info.trade_tick_value,
         "trade_tick_size": info.trade_tick_size,
         "trade_contract_size": info.trade_contract_size,
+        "volume_min": info.volume_min,
+        "volume_step": info.volume_step,
         "point": info.point
     })
 
@@ -215,6 +217,71 @@ def execute_trade():
 
     logger.info(f"Order placed successfully. Ticket: {result.order}")
     return jsonify({"success": True, "ticket": result.order, "message": "Order executed successfully"})
+
+@app.route("/trade/close", methods=["POST"])
+def close_trade():
+    data = request.json
+    if not data or "ticket" not in data:
+        return jsonify({"success": False, "message": "Missing ticket"}), 400
+
+    ticket = int(data["ticket"])
+    position = mt5.positions_get(ticket=ticket)
+    if not position or len(position) == 0:
+        return jsonify({"success": False, "message": "Position not found"}), 404
+        
+    pos = position[0]
+    symbol = pos.symbol
+    lot = pos.volume
+    order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+    price = mt5.symbol_info_tick(symbol).bid if order_type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
+
+    req = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": lot,
+        "type": order_type,
+        "position": ticket,
+        "price": price,
+        "deviation": 20,
+        "magic": pos.magic,
+        "comment": "ACE Terminal Close",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+
+    result = mt5.order_send(req)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        logger.error(f"Close failed, retcode={result.retcode}")
+        return jsonify({"success": False, "message": f"Close failed, retcode={result.retcode}"})
+
+    return jsonify({"success": True, "message": "Position closed successfully"})
+
+@app.route("/trade/modify", methods=["POST"])
+def modify_trade():
+    data = request.json
+    if not data or "ticket" not in data:
+        return jsonify({"success": False, "message": "Missing ticket"}), 400
+
+    ticket = int(data["ticket"])
+    position = mt5.positions_get(ticket=ticket)
+    if not position or len(position) == 0:
+        return jsonify({"success": False, "message": "Position not found"}), 404
+
+    pos = position[0]
+    req = {
+        "action": mt5.TRADE_ACTION_SLTP,
+        "symbol": pos.symbol,
+        "position": ticket,
+        "sl": float(data["sl"]) if "sl" in data else pos.sl,
+        "tp": float(data["tp"]) if "tp" in data else pos.tp,
+    }
+
+    result = mt5.order_send(req)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        logger.error(f"Modify failed, retcode={result.retcode}")
+        return jsonify({"success": False, "message": f"Modify failed, retcode={result.retcode}"})
+
+    return jsonify({"success": True, "message": "Position modified successfully"})
 
 from simulator import simulate_trade, OrderType
 

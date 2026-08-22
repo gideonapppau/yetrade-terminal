@@ -7,6 +7,17 @@
   ],
   "permissions": [
     "core:default",
-    "sql:default"
+    "sql:default",
+    "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "python",
+          "cmd": "python"
+        }
+      ]
+    },
+    "shell:default"
   ]
 }
