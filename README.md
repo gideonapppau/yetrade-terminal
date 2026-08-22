@@ -1,182 +1,49 @@
-<div align="center">
+# YetTrade Terminal: Executive Overview
 
-# Gideon Appau
+## Introduction
+The YetTrade Terminal is a modern, high-performance desktop application designed to bridge the gap between automated trading signals and live market execution. Built with reliability and speed in mind, it serves as a command center for both algorithmic and manual traders.
 
-### Full-Stack Software Engineer
+This system securely integrates with MetaTrader 5 (MT5) - the industry standard trading platform - and automatically parses trading signals from Telegram. It features a built-in risk management engine that enforces strict trading rules and calculates precise position sizes to protect capital.
 
-Building web, mobile, and backend systems with TypeScript, Go, Python, and React.
+## Core Features and Business Value
 
-[![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/gideonapppau)
-[![X](https://img.shields.io/badge/X-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/)
-[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtube.com/)
-[![TikTok](https://img.shields.io/badge/TikTok-000000?style=for-the-badge&logo=tiktok&logoColor=white)](https://www.tiktok.com/)
+* **Automated Trade Execution (MT5 Integration)**
+  The application establishes a direct, low-latency connection to the broker using a custom Python bridge. This allows the system to read live market data and execute trades instantaneously without manual intervention.
 
-</div>
+* **Real-time Signal Parsing**
+  A built-in engine actively monitors designated Telegram channels. It extracts structured trade data (such as entry prices, stop losses, and take profits) from incoming messages and queues them for execution, eliminating the delay and human error associated with manual data entry.
 
----
+* **Advanced Risk Management**
+  Capital preservation is strictly enforced through a comprehensive Risk Engine. Before any trade is executed, the system calculates the exact position size based on the specific asset's contract specifications and the user's predefined risk tolerance.
 
-## About
+* **Live Analytics and Dashboard**
+  The user interface provides a real-time overview of active positions, historical performance, and overall account equity. It utilizes professional charting tools to track market movements and analyze trading history.
 
-I'm a full-stack software engineer with 3+ years of experience building applications across web, mobile, backend, and automation.
+* **Secure Local Storage**
+  All trading history, configuration settings, and signal data are stored securely on the user's local machine using an embedded database. This ensures privacy and fast data retrieval without relying on external cloud storage.
 
-I work primarily with TypeScript, Go, Python, React, Next.js, React Native, Node.js, and PostgreSQL. I'm particularly interested in backend architecture, product engineering, automation, and systems that have to work reliably outside of a demo environment.
+## Technical Architecture (Simplified)
 
-My current focus is **YETSO**, a social discovery product built around conversation and progressive identity reveal.
+To ensure maximum performance and security, the application is constructed using a multi-tiered architecture:
 
-Outside of software, I spend time on photography, cinematography, storytelling, music, and exploring financial markets.
+* **Presentation Layer (React & TypeScript):** The visual interface that the user interacts with. It is built to be highly responsive and fluid.
+* **Application Framework (Tauri):** The core desktop shell. It provides a secure environment for the interface to run while consuming significantly less system memory compared to traditional desktop frameworks.
+* **Execution Layer (Python):** A specialized background process that communicates directly with the MetaTrader 5 terminal, handling the complex financial routing required for trade execution.
+* **Local Database (SQLite):** A lightweight, self-contained database system that securely logs all activity directly on the computer's hard drive.
+* **State Management (Zustand):** The internal memory system that keeps the user interface perfectly synchronized with live market data and active trades.
 
----
+## System Requirements
 
-## Currently Building
+* **Operating System:** Windows (Required for MetaTrader 5 compatibility)
+* **Trading Platform:** MetaTrader 5 Terminal installed and running
+* **Background Dependencies:** Python 3.10 or higher
+* **Application Dependencies:** Node.js (v18+) and Rust (for building the application from source)
 
-### YETSO
+## Deployment Instructions
 
-**You haven't met them yet. So find out.**
+1. **Install Dependencies:** Download the required software libraries for the interface.
+2. **Initialize the Execution Layer:** Start the Python bridge to establish the connection to the MT5 platform.
+3. **Launch the Terminal:** Start the desktop application to access the dashboard and configure trading parameters.
 
-YETSO is a social discovery platform built around a simple idea: people should have an opportunity to interact before a profile gives them a reason to make a decision.
-
-Instead of starting with photos, bios, and swipe decisions, YETSO introduces people progressively through conversation and controlled identity reveal.
-
-The product is designed around:
-
-- Progressive identity reveal
-- Conversation-first discovery
-- Time-boxed interactions
-- Anonymous interaction
-- Smart matching and queueing
-- Connection windows
-- Deliberate transitions from anonymity to identity
-
-YETSO is currently my primary product focus.
-
----
-
-## What I Work With
-
-### Languages
-
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)
-![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E.svg?style=for-the-badge&logo=javascript&logoColor=black)
-![Go](https://img.shields.io/badge/Go-00ADD8.svg?style=for-the-badge&logo=go&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB.svg?style=for-the-badge&logo=python&logoColor=white)
-
-### Frontend & Mobile
-
-![React](https://img.shields.io/badge/React-20232A.svg?style=for-the-badge&logo=react&logoColor=61DAFB)
-![React Native](https://img.shields.io/badge/React_Native-20232A.svg?style=for-the-badge&logo=react&logoColor=61DAFB)
-![Next.js](https://img.shields.io/badge/Next.js-000000.svg?style=for-the-badge&logo=next.js&logoColor=white)
-![Angular](https://img.shields.io/badge/Angular-DD0031.svg?style=for-the-badge&logo=angular&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4.svg?style=for-the-badge&logo=tailwindcss&logoColor=white)
-
-### Backend
-
-![Node.js](https://img.shields.io/badge/Node.js-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)
-![Go](https://img.shields.io/badge/Go-00ADD8.svg?style=for-the-badge&logo=go&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB.svg?style=for-the-badge&logo=python&logoColor=white)
-![JWT](https://img.shields.io/badge/JWT-000000.svg?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
-
-### Databases & Infrastructure
-
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1.svg?style=for-the-badge&logo=postgresql&logoColor=white)
-![MongoDB](https://img.shields.io/badge/MongoDB-47A248.svg?style=for-the-badge&logo=mongodb&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D.svg?style=for-the-badge&logo=redis&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-003B57.svg?style=for-the-badge&logo=sqlite&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED.svg?style=for-the-badge&logo=docker&logoColor=white)
-
-### Desktop, Cloud & Tooling
-
-![Tauri](https://img.shields.io/badge/Tauri-24C8DB.svg?style=for-the-badge&logo=tauri&logoColor=white)
-![Render](https://img.shields.io/badge/Render-46E3B7.svg?style=for-the-badge&logo=render&logoColor=black)
-![Netlify](https://img.shields.io/badge/Netlify-00C7B7.svg?style=for-the-badge&logo=netlify&logoColor=white)
-![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF.svg?style=for-the-badge&logo=github-actions&logoColor=white)
-![Git](https://img.shields.io/badge/Git-F05032.svg?style=for-the-badge&logo=git&logoColor=white)
-![Figma](https://img.shields.io/badge/Figma-F24E1E.svg?style=for-the-badge&logo=figma&logoColor=white)
-![Jest](https://img.shields.io/badge/Jest-C21325.svg?style=for-the-badge&logo=jest&logoColor=white)
-
----
-
-## Engineering Interests
-
-- Backend and API design
-- Distributed systems
-- Event-driven architecture
-- Automation
-- AI-assisted applications
-- Product engineering
-- Offline-first software
-- Developer tooling
-- Data-intensive applications
-- Trading and financial technology
-
----
-
-## GitHub Statistics
-
-<p align="center">
-  <img src="https://github-readme-stats.shion.dev/api?username=gideonapppau&theme=ambient_gradient&hide_border=true&include_all_commits=true&count_private=true" height="165" />
-  <img src="https://github-readme-stats.shion.dev/api/top-langs/?username=gideonapppau&theme=ambient_gradient&hide_border=true&include_all_commits=true&count_private=true&layout=compact" height="165" />
-</p>
-
-<p align="center">
-  <img src="https://streak-stats.demolab.com/?user=gideonapppau&theme=ambient_gradient&hide_border=true" />
-</p>
-
----
-
-## GitHub Trophies
-
-<p align="center">
-  <img src="https://github-profile-trophy.vercel.app/?username=gideonapppau&theme=radical&no-frame=false&no-bg=true&margin-w=4" />
-</p>
-
----
-
-## Activity
-
-<p align="center">
-  <img src="https://github-readme-activity-graph.vercel.app/graph?username=gideonapppau&theme=react-dark&hide_border=true" />
-</p>
-
----
-
-## Profile Views
-
-<p align="center">
-  <img src="https://komarev.com/ghpvc/?username=gideonapppau&label=Profile%20Views&color=13&style=for-the-badge" />
-</p>
-
----
-
-## Beyond Software
-
-Photography, cinematography, storytelling, music, and financial markets are the other areas I spend time learning and creating in.
-
----
-
-## Connect
-
-<p align="center">
-  <a href="https://x.com/">
-    <img src="https://img.shields.io/badge/X-000000.svg?style=for-the-badge&logo=x&logoColor=white" />
-  </a>
-  <a href="https://www.tiktok.com/">
-    <img src="https://img.shields.io/badge/TikTok-000000.svg?style=for-the-badge&logo=tiktok&logoColor=white" />
-  </a>
-  <a href="https://youtube.com/">
-    <img src="https://img.shields.io/badge/YouTube-FF0000.svg?style=for-the-badge&logo=youtube&logoColor=white" />
-  </a>
-</p>
-
----
-
-## Random Dev Quote
-
-<p align="center">
-  <img src="https://quotes-github-readme.vercel.app/api?type=horizontal&theme=radical" />
-</p>
-
----
-
-<p align="center">
-  <sub>© Gideon Appau</sub>
-</p>
+## License
+MIT
