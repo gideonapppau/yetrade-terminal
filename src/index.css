@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@theme {
+  --color-background: #F3F5F7;
+  --color-surface: #FFFFFF;
+  --color-elevated: #F9FAFB;
+  --color-border: #E5E7EB;
+  
+  --color-primary: #111827;
+  --color-primary-foreground: #FFFFFF;
+  
+  --color-secondary: #6B7280;
+  --color-secondary-foreground: #111827;
+
+  --color-accent: #6366F1;
+  --color-accent-foreground: #FFFFFF;
+
+  --color-success: #10b981;
+  --color-success-bg: #ecfdf5;
+  --color-warning: #f59e0b;
+  --color-destructive: #ef4444;
+  --color-destructive-bg: #fef2f2;
+  
+  --color-input: #FFFFFF;
+  --color-ring: #6366F1;
+  
+  --font-sans: 'Space Grotesk', sans-serif;
+}
+
+@layer base {
+  :root {
+    --color-background: #F3F5F7;
+    --color-surface: #FFFFFF;
+    --color-elevated: #F9FAFB;
+    --color-border: #E5E7EB;
+    --color-primary: #111827;
+    --color-primary-foreground: #FFFFFF;
+    --color-secondary: #6B7280;
+    --color-secondary-foreground: #111827;
+    --color-success-bg: #ecfdf5;
+    --color-destructive-bg: #fef2f2;
+    --color-input: #FFFFFF;
+  }
+
+  .dark {
+    --color-background: #0B0D10;
+    --color-surface: #13161C;
+    --color-elevated: #1E222A;
+    --color-border: #2C313C;
+    --color-primary: #F3F4F6;
+    --color-primary-foreground: #0B0D10;
+    --color-secondary: #9CA3AF;
+    --color-secondary-foreground: #F3F4F6;
+    --color-success-bg: rgba(16, 185, 129, 0.1);
+    --color-destructive-bg: rgba(239, 68, 68, 0.1);
+    --color-input: #13161C;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-primary);
+    font-feature-settings: "rlig" 1, "calt" 1;
+    @apply font-sans transition-colors duration-300;
+  }
+  
+  /* Ensure inputs and buttons inherit the font */
+  input, button, select, textarea {
+    @apply font-sans;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  .card {
+    @apply bg-surface rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.05)];
+  }
+  .card-hover {
+    @apply transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:-translate-y-1;
+  }
+}
