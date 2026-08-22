@@ -32,8 +32,8 @@ export class ExecutionEngine {
       let volMin = 0.01;
       let volStep = 0.01;
       
-      if ('getSymbolInfo' in this.adapter) {
-         const symbolInfo = await (this.adapter as any).getSymbolInfo(request.signal.symbol);
+      if (this.adapter.getSymbolInfo) {
+         const symbolInfo = await this.adapter.getSymbolInfo(request.signal.symbol);
          if (symbolInfo) {
            volMin = symbolInfo.volume_min || 0.01;
            volStep = symbolInfo.volume_step || 0.01;
@@ -45,7 +45,7 @@ export class ExecutionEngine {
       // Format to 2 decimal places to avoid floating point precision issues
       splitSize = Number(splitSize.toFixed(2));
       
-      let allSuccess = true;
+      let allFilled = true;
       let executedAtLeastOne = false;
       
       for (let i = 0; i < numSplits; i++) {
@@ -69,17 +69,20 @@ export class ExecutionEngine {
             symbol: request.signal.symbol,
             direction: request.signal.direction,
             volume: splitSize,
-            entryPrice: result.entryPrice || request.signal.entry || 0,
+            entryPrice: result.entryPrice ?? request.signal.entry ?? null,
             status: 'OPEN'
           });
           executedAtLeastOne = true;
         } else {
-          allSuccess = false;
+          allFilled = false;
           logger.error({ result, splitIndex: i }, 'Broker failed to execute split trade');
         }
       }
 
       if (executedAtLeastOne) {
+        if (!allFilled) {
+          logger.warn({ signalId: request.signalId }, 'Only some TP splits filled - marking EXECUTED');
+        }
         await db.update(signals)
           .set({ status: 'EXECUTED' })
           .where(eq(signals.id, request.signalId));

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useTelegramStore } from "./store/telegram"
 import { useMT5Store } from "./store/mt5"
@@ -11,6 +11,11 @@ import { Search } from "lucide-react"
 import { getDb } from "./db"
 import { trades, signals as signalsSchema } from "./db/schema"
 import { eq, or } from "drizzle-orm"
+import { logger } from "./core/logger"
+import type { OpenPosition } from "./core/execution-engine/types"
+import { pipsToPoints } from "./lib/utils"
+
+type TradeRecord = typeof trades.$inferSelect
 
 import { WelcomeHeader } from "./components/dashboard/WelcomeHeader"
 import { TotalBalanceCard } from "./components/dashboard/TotalBalanceCard"
@@ -27,12 +32,13 @@ type HistoryFilter = 'ALL' | 'CLOSED_WIN' | 'CLOSED_LOSS'
 function App() {
   const { connectionState, config, client, service, setClient, setService, setConnectionState, setProfile, logout } = useTelegramStore()
   const liveProfits = useMT5Store(state => state.liveProfits)
+  const accountBalance = useMT5Store(state => state.balance)
   const [activePage, setActivePage] = useState("Dashboard")
   const isConnecting = useRef(false)
 
   // Dashboard trade data
-  const [openTrades, setOpenTrades] = useState<any[]>([])
-  const [closedTrades, setClosedTrades] = useState<any[]>([])
+  const [openTrades, setOpenTrades] = useState<TradeRecord[]>([])
+  const [closedTrades, setClosedTrades] = useState<TradeRecord[]>([])
   const [tradeSearch, setTradeSearch] = useState("")
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('ALL')
 
@@ -44,7 +50,7 @@ function App() {
       const open = await db.select().from(trades).where(eq(trades.status, 'OPEN'));
       setOpenTrades(open);
     } catch (e) {
-      console.error("Failed to load dashboard trades", e);
+      logger.error({ err: e }, "Failed to load dashboard trades");
     }
   }, []);
 
@@ -67,12 +73,12 @@ function App() {
         const openTradesInDb = await db.select().from(trades).where(eq(trades.status, 'OPEN'));
         if (openTradesInDb.length === 0) return;
 
-        const openPositions = await mt5.adapter.getOpenPositions();
-        const openTickets = new Set(openPositions.map((p: any) => String(p.ticket)));
+        const openPositions: OpenPosition[] = await mt5.adapter.getOpenPositions();
+        const openTickets = new Set(openPositions.map((p) => String(p.ticket)));
 
         const newProfits: Record<string, number> = {};
         for (const p of openPositions) {
-          newProfits[String(p.ticket)] = p.profit;
+          newProfits[String(p.ticket)] = p.profit ?? 0;
         }
         mt5.setLiveProfits(newProfits);
 
@@ -82,28 +88,54 @@ function App() {
         const settings = useSettingsStore.getState().executionSettings;
         const autoBreakeven = settings.autoBreakEvenEnabled;
         const trailingStop = settings.trailingStopEnabled;
-        const beTrigger = parseFloat(settings.autoBreakEvenTrigger) || 0;
-        const tsTrigger = settings.trailingStopTriggerPips || 0;
-        const tsDistance = settings.trailingStopDistancePips || 0;
+        const beTriggerPips = settings.autoBreakEvenTriggerPips || 0;
+        const tsTriggerPips = settings.trailingStopTriggerPips || 0;
+        const tsDistancePips = settings.trailingStopDistancePips || 0;
 
         for (const t of openTradesInDb) {
+          if (t.id.startsWith('paper-')) {
+            // Simulated trades are managed entirely by the paper adapter's own
+            // lifecycle - the MT5 position poll must not close them.
+            continue;
+          }
           if (!openTickets.has(t.id)) {
-            // Missing from MT5 open positions -> it closed
+            // Missing from MT5 open positions -> it closed on the broker side.
+            // Prefer the broker's own deal history for realized P&L; fall back
+            // to the last known floating value only if history is unavailable.
+            let pnl: number | null = null;
+            if (typeof mt5.adapter.getDeals === 'function') {
+              const deals = await mt5.adapter.getDeals(t.id);
+              if (deals && deals.length > 0) {
+                pnl = deals.reduce(
+                  (sum, d) => sum + (d.profit ?? 0) + (d.commission ?? 0) + (d.swap ?? 0),
+                  0
+                );
+              }
+            }
+            if (pnl === null && typeof mt5.liveProfits[t.id] === 'number') {
+              pnl = mt5.liveProfits[t.id];
+            }
             await db.update(trades)
-              .set({ status: 'CLOSED_WIN' }) // Simplify result for MVP
+              .set({ status: pnl !== null && pnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS', pnl, closedAt: Date.now() })
               .where(eq(trades.id, t.id));
             changed = true;
+            logger.info({ tradeId: t.id, pnl }, 'Position closed on broker');
           } else if (autoBreakeven || trailingStop) {
             // Look up the live position
-            const pos = openPositions.find((p: any) => String(p.ticket) === t.id);
+            const pos = openPositions.find((p) => String(p.ticket) === t.id);
             if (pos && typeof mt5.adapter.modifyTrade === 'function' && t.entryPrice) {
-              const symbolInfo = await mt5.adapter.getSymbolInfo(pos.symbol);
-              if (symbolInfo) {
-                const point = symbolInfo.point || 0.00001;
+              const symbolInfo = await mt5.adapter.getSymbolInfo?.(pos.symbol);
+              if (symbolInfo && symbolInfo.point && pos.price_current != null) {
+                const point = symbolInfo.point;
                 const isBuy = pos.type === 'BUY';
                 const currentPrice = pos.price_current;
                 const entryPrice = t.entryPrice;
-                const currentSl = pos.sl;
+                const currentSl = pos.sl ?? 0;
+
+                // Settings are in pips; the engine works in points
+                const beTrigger = pipsToPoints(beTriggerPips, point);
+                const tsTrigger = pipsToPoints(tsTriggerPips, point);
+                const tsDistance = pipsToPoints(tsDistancePips, point);
 
                 // Distance in points
                 const profitPoints = isBuy ? (currentPrice - entryPrice) / point : (entryPrice - currentPrice) / point;
@@ -111,14 +143,14 @@ function App() {
 
                 // 1. Trailing Stop
                 if (trailingStop && tsTrigger > 0 && tsDistance > 0 && profitPoints >= tsTrigger) {
-                  const candidateSl = isBuy ? currentPrice - (tsDistance * point) : currentPrice + (tsDistance * point);
+                  const candidateSl = isBuy ? currentPrice - tsDistance * point : currentPrice + tsDistance * point;
                   // Move SL only if it's better than current SL
                   if (isBuy && candidateSl > currentSl) newSl = candidateSl;
                   if (!isBuy && (currentSl === 0 || candidateSl < currentSl)) newSl = candidateSl;
                 }
                 // 2. Breakeven
                 else if (autoBreakeven && beTrigger > 0 && profitPoints >= beTrigger) {
-                  // Just set to entry price (maybe + a few points for spread, but just entry for MVP)
+                  // Move SL to entry once the trigger is reached
                   if (isBuy && currentSl < entryPrice) newSl = entryPrice;
                   if (!isBuy && (currentSl === 0 || currentSl > entryPrice)) newSl = entryPrice;
                 }
@@ -135,7 +167,7 @@ function App() {
           loadDashboardTrades();
         }
       } catch (err) {
-        console.error("Trade monitor error:", err);
+        logger.error({ err }, "Trade monitor error");
       }
     }, 5000);
     return () => clearInterval(interval);
@@ -150,7 +182,7 @@ function App() {
         const db = await getDb();
         const allSignals = await db.select().from(signalsSchema);
         if (!cancelled) {
-          setSignalTimes(new Map(allSignals.map((s: any) => [s.id, s.receivedAt])));
+          setSignalTimes(new Map(allSignals.map((s) => [s.id, s.receivedAt])));
         }
       } catch {
         // Timestamps stay unavailable - dates simply render blank
@@ -160,8 +192,8 @@ function App() {
   }, [closedTrades]);
 
   const filteredHistory = closedTrades
-    .filter((t: any) => historyFilter === 'ALL' || t.status === historyFilter)
-    .filter((t: any) => {
+    .filter((t) => historyFilter === 'ALL' || t.status === historyFilter)
+    .filter((t) => {
       const q = tradeSearch.trim().toLowerCase();
       if (!q) return true;
       return (
@@ -171,7 +203,25 @@ function App() {
       );
     });
 
-  const formatTradeDate = (signalId: string) => {
+  // Realized-P&L curve built from closed trades (cumulative, % of balance)
+  const equityCurve = useMemo(() => {
+    const points = closedTrades
+      .filter((t) => t.pnl != null && t.signalId)
+      .map((t) => ({ time: signalTimes.get(t.signalId as string) ?? null, pnl: t.pnl as number }))
+      .filter((p): p is { time: number; pnl: number } => p.time != null)
+      .sort((a, b) => a.time - b.time);
+    let cum = 0;
+    return points.map((p) => {
+      cum += p.pnl;
+      return {
+        time: new Date(p.time).toISOString(),
+        equity: accountBalance > 0 ? Number(((cum / accountBalance) * 100).toFixed(2)) : 0,
+      };
+    });
+  }, [closedTrades, signalTimes, accountBalance]);
+
+  const formatTradeDate = (signalId: string | null) => {
+    if (!signalId) return '';
     const ts = signalTimes.get(signalId);
     if (!ts) return '';
     return new Date(ts).toLocaleString(undefined, {
@@ -184,14 +234,15 @@ function App() {
       toast.info("Nothing to export", { description: "No trades match the current filters." });
       return;
     }
-    const header = '"Trade ID","Symbol","Direction","Volume","Entry Price","Result"';
-    const rows = filteredHistory.map((t: any) =>
+    const header = '"Trade ID","Symbol","Direction","Volume","Entry Price","P/L","Result"';
+    const rows = filteredHistory.map((t) =>
       [
         t.id,
         t.symbol,
         t.direction,
         t.volume,
         t.entryPrice ?? '',
+        t.pnl ?? '',
         t.status === 'CLOSED_WIN' ? 'Win' : 'Loss',
       ]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
@@ -261,7 +312,7 @@ function App() {
             async () => ""
           );
 
-          const me = await adapter.getMe() as any;
+          const me = await adapter.getMe() as { firstName?: string; lastName?: string; username?: string };
           setProfile({
             firstName: me.firstName,
             lastName: me.lastName,
@@ -271,7 +322,7 @@ function App() {
           setClient(adapter);
           setConnectionState('CONNECTED');
         } catch (e: any) {
-          console.error("Auto-reconnect failed", e);
+          logger.error({ err: e }, "Auto-reconnect failed");
           const errorMsg = e?.message || String(e) || '';
           if (errorMsg.includes('AUTH_KEY_UNREGISTERED') || errorMsg.includes('SESSION_REVOKED') || errorMsg.includes('401')) {
             logout();
@@ -321,7 +372,7 @@ function App() {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center text-primary">
         <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="font-medium text-lg text-secondary animate-pulse">Connecting to Telegram...</p>
+        <p className="font-medium text-lg text-secondary">Connecting to Telegram...</p>
       </div>
     );
   }
@@ -361,7 +412,7 @@ function App() {
               <MarketLeadersCard />
             </div>
             <div className="grid grid-cols-12 gap-6 mb-6">
-              <EquityChartCard />
+              <EquityChartCard data={equityCurve} />
             </div>
             <div className="grid grid-cols-12 gap-6">
               {/* Active Trades */}
@@ -390,7 +441,7 @@ function App() {
                   <>
                     <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
                       <AnimatePresence mode="popLayout">
-                        {openTrades.map((t: any) => {
+                        {openTrades.map((t) => {
                           const profit = liveProfits[t.id];
                           return (
                             <motion.div
@@ -474,6 +525,7 @@ function App() {
                       <th className="font-medium pb-4 text-left font-sans">Type</th>
                       <th className="font-medium pb-4 text-left font-sans">Opened</th>
                       <th className="font-medium pb-4 text-right font-sans">Volume</th>
+                      <th className="font-medium pb-4 text-right font-sans">P/L</th>
                       <th className="font-medium pb-4 text-center font-sans">Result</th>
                     </tr>
                   </thead>
@@ -484,7 +536,7 @@ function App() {
                           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                           key="empty-history"
                         >
-                          <td colSpan={6} className="py-12">
+                          <td colSpan={7} className="py-12">
                             <div className="flex flex-col items-center justify-center text-center">
                               <div className="w-12 h-12 bg-elevated rounded-full flex items-center justify-center text-secondary mb-3 shadow-sm">
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
@@ -501,7 +553,7 @@ function App() {
                           </td>
                         </motion.tr>
                       ) : (
-                        filteredHistory.map((t: any) => (
+                        filteredHistory.map((t) => (
                           <motion.tr
                             layout
                             initial={{ opacity: 0, y: 10 }}
@@ -519,6 +571,9 @@ function App() {
                             </td>
                             <td className="py-3 text-secondary">{formatTradeDate(t.signalId)}</td>
                             <td className="py-3 text-right tabular-nums">{t.volume} lots</td>
+                            <td className={`py-3 text-right tabular-nums font-medium ${t.pnl == null ? 'text-secondary' : t.pnl >= 0 ? 'text-success' : 'text-destructive'}`}>
+                              {t.pnl == null ? '—' : `${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}`}
+                            </td>
                             <td className="py-3 text-center">
                               <span className={`px-2 py-1 rounded text-xs font-medium border ${t.status === 'CLOSED_WIN' ? 'bg-success-bg border-success/20 text-success' : 'bg-destructive-bg border-destructive/20 text-destructive'}`}>
                                 {t.status === 'CLOSED_WIN' ? 'Win' : 'Loss'}

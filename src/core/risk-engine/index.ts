@@ -4,6 +4,7 @@ import { logger } from '../logger';
 import {
   MIN_POSITION_SIZE_LOTS,
   POSITION_SIZE_DECIMALS,
+  MOCK_TICK_VALUE_PER_LOT,
 } from '../constants';
 
 export class RiskEngine {
@@ -20,6 +21,18 @@ export class RiskEngine {
     const ruleResults: RuleResult[] = [];
     let isApproved = true;
 
+    // 0. News filter (fail-closed): there is no economic-calendar integration
+    // yet, so an enabled news filter blocks trading instead of pretending to
+    // know the calendar.
+    if (config.newsFilterEnabled) {
+      ruleResults.push({
+        ruleName: 'News Filter',
+        passed: false,
+        message: 'News filter is enabled but no economic calendar is connected'
+      });
+      isApproved = false;
+    }
+
     // 1. Max Open Groups Check
     const groupCheck = account.openGroupsCount < config.maxOpenTradeGroups;
     ruleResults.push({
@@ -28,6 +41,18 @@ export class RiskEngine {
       message: groupCheck ? 'Within limits' : `Exceeded max open groups (${config.maxOpenTradeGroups})`
     });
     if (!groupCheck) isApproved = false;
+
+    // 1b. Max open risk (approximated: each open group commits riskPerTradePercent)
+    const openRisk = account.openRiskPercent ?? account.openGroupsCount * config.riskPerTradePercent;
+    const openRiskCheck = openRisk < config.maxOpenRiskPercent;
+    ruleResults.push({
+      ruleName: 'Max Open Risk',
+      passed: openRiskCheck,
+      message: openRiskCheck
+        ? 'Within limits'
+        : `Open risk ${openRisk.toFixed(1)}% would exceed max ${config.maxOpenRiskPercent}%`
+    });
+    if (!openRiskCheck) isApproved = false;
 
     // 2. Drawdown Check
     const drawdownCheck = account.currentDrawdown < config.maxDrawdownPercent;
@@ -106,7 +131,7 @@ export class RiskEngine {
           positionSize = riskAmount / monetaryRiskPerLot;
         } else {
           // Fallback if symbol info is missing (e.g. testing)
-          positionSize = riskAmount / (stopDistance * 10);
+          positionSize = riskAmount / (stopDistance * MOCK_TICK_VALUE_PER_LOT);
         }
         const scale = Math.pow(10, POSITION_SIZE_DECIMALS);
         positionSize = Math.max(MIN_POSITION_SIZE_LOTS, Math.round(positionSize * scale) / scale);

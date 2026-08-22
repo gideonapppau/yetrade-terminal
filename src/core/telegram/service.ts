@@ -1,6 +1,6 @@
 import { TelegramAdapter } from './client';
 import { getDb } from '../../db';
-import { signals, telegramChannels, trades } from '../../db/schema';
+import { signals, telegramChannels, telegramMessages, trades } from '../../db/schema';
 import { RegexParser } from '../signal-engine/parser';
 import { logger } from '../logger';
 import type { RawTelegramMessage } from './types';
@@ -11,7 +11,6 @@ import { useMT5Store } from '../../store/mt5';
 
 import { RiskEngine } from '../risk-engine';
 import { ExecutionEngine } from '../execution-engine';
-import { MT5Adapter } from '../execution-engine/mt5-adapter';
 import { toast } from 'sonner';
 import { playPop, playSuccess, playError } from '../../lib/sounds';
 
@@ -25,13 +24,14 @@ export class TelegramService {
     this.adapter = adapter;
     this.parser = new RegexParser();
     this.riskEngine = new RiskEngine();
-    this.executionEngine = new ExecutionEngine(new MT5Adapter());
+    // Reuse the shared broker adapter so bridge URL updates apply here too
+    this.executionEngine = new ExecutionEngine(useMT5Store.getState().adapter);
   }
 
   async loadActiveChannels(): Promise<string[]> {
     const db = await getDb();
     const active = await db.select().from(telegramChannels).where(eq(telegramChannels.isActive, 1));
-    return active.map((c: any) => c.channelId);
+    return active.map((c) => c.channelId);
   }
 
   async startListening() {
@@ -42,15 +42,76 @@ export class TelegramService {
         return;
       }
 
-      this.adapter.subscribeToChannels(channelIds, this.handleNewMessage.bind(this));
+      this.adapter.subscribeToChannels(
+        channelIds,
+        this.handleNewMessage.bind(this),
+        this.handleEditedMessage.bind(this)
+      );
     } catch (err) {
       logger.error({ err }, 'Failed to start Telegram listener');
     }
   }
 
+  /** Persists the untouched message text before any parsing happens. */
+  private async storeRawMessage(rawMessage: RawTelegramMessage): Promise<void> {
+    const db = await getDb();
+    const id = `${rawMessage.channelId}:${rawMessage.messageId}`;
+    await db
+      .insert(telegramMessages)
+      .values({
+        id,
+        channelId: rawMessage.channelId,
+        messageId: rawMessage.messageId,
+        text: rawMessage.text,
+        receivedAt: rawMessage.timestamp.getTime(),
+        editedAt: null,
+      })
+      .onConflictDoNothing();
+  }
+
+  /**
+   * Edits are recorded but NEVER re-executed - a source editing an already
+   * published signal is a classic manipulation vector, so we fail closed.
+   */
+  private async handleEditedMessage(rawMessage: RawTelegramMessage): Promise<void> {
+    try {
+      await this.storeRawMessage(rawMessage);
+
+      const db = await getDb();
+      const id = `${rawMessage.channelId}:${rawMessage.messageId}`;
+      await db
+        .update(telegramMessages)
+        .set({ text: rawMessage.text, editedAt: Date.now() })
+        .where(eq(telegramMessages.id, id));
+
+      const existingSignals = await db.select().from(signals).where(eq(signals.id, rawMessage.messageId));
+      if (existingSignals.length > 0 && existingSignals[0].status === 'EXECUTED') {
+        logger.warn(
+          { signalId: rawMessage.messageId, symbol: existingSignals[0].symbol },
+          'Source edited an EXECUTED signal message - ignoring per fail-safe policy'
+        );
+        toast.warning(`Signal ${existingSignals[0].symbol} was edited by its source`, {
+          description: 'The original trade stays open. Edits never trigger execution.',
+        });
+      } else if (existingSignals.length > 0) {
+        logger.info(
+          { signalId: rawMessage.messageId, status: existingSignals[0].status },
+          'Source edited a signal message before execution - ignoring'
+        );
+        toast.warning(`Signal ${existingSignals[0].symbol} was edited by its source`, {
+          description: 'Edits are recorded but never executed.',
+        });
+      }
+    } catch (err) {
+      logger.error({ err }, 'Failed to record edited Telegram message');
+    }
+  }
+
   async handleNewMessage(rawMessage: RawTelegramMessage) {
     try {
-      // 1. Store Raw Message (Skipped explicit raw table for now, directly processing)
+      // 1. Store the raw message exactly as received (before any parsing)
+      await this.storeRawMessage(rawMessage);
+
       // 2. Parse Signal
       if (this.parser.canParse(rawMessage.text)) {
         const parsed = this.parser.parse(rawMessage.text);
@@ -91,14 +152,30 @@ export class TelegramService {
           const paused = settings.tradingPaused;
           let rejectReason: string | undefined;
 
-          // Channel-level overrides fall back to the global risk configuration
+          // Channel-level overrides fall back to the global risk configuration.
+          // Overrides below 1 (or negative) are treated as corrupt legacy data
+          // and ignored rather than honored. The global config itself is also
+          // floored at 1 - persisted settings may predate input validation.
           const channelRow = channelExists[0] as
             | { name: string; riskPerTrade: number | null; maxTradesPerDay: number | null }
             | undefined;
-          const effectiveRiskPercent =
-            channelRow?.riskPerTrade ?? settings.riskConfig.riskPerTradePercent;
-          const effectiveRiskConfig: typeof settings.riskConfig = {
+          const overrideRisk = channelRow?.riskPerTrade;
+          const overrideCap = channelRow?.maxTradesPerDay;
+          const safeGlobalRisk = {
             ...settings.riskConfig,
+            riskPerTradePercent: Math.max(1, settings.riskConfig.riskPerTradePercent),
+            maxDailyLossPercent: Math.max(1, settings.riskConfig.maxDailyLossPercent),
+            maxOpenRiskPercent: Math.max(1, settings.riskConfig.maxOpenRiskPercent),
+            maxSlippagePoints: Math.max(1, Math.round(settings.riskConfig.maxSlippagePoints)),
+          };
+          const effectiveRiskPercent =
+            overrideRisk != null && overrideRisk >= 1
+              ? overrideRisk
+              : safeGlobalRisk.riskPerTradePercent;
+          const effectiveMaxTradesPerDay =
+            overrideCap != null && overrideCap >= 1 ? overrideCap : undefined;
+          const effectiveRiskConfig: typeof settings.riskConfig = {
+            ...safeGlobalRisk,
             riskPerTradePercent: effectiveRiskPercent,
           };
 
@@ -123,7 +200,7 @@ export class TelegramService {
             );
 
           // Daily loss approximation: signals executed today count against the daily loss budget
-          const dailyLossPercent = todaySignals.length * effectiveRiskPercent;
+          const dailyLossPercent = todaySignals.length * safeGlobalRisk.riskPerTradePercent;
 
           // Prefer live broker balance when available; fall back to configured balance
           const effectiveBalance =
@@ -134,9 +211,11 @@ export class TelegramService {
             equity: effectiveBalance,
             freeMargin: effectiveBalance,
             openGroupsCount: openTrades.length,
+            // Each open group commits roughly one unit of configured risk
+            openRiskPercent: openTrades.length * effectiveRiskPercent,
             currentDrawdown: 0,
             dailyLoss: dailyLossPercent,
-            maxTradesPerDay: channelRow?.maxTradesPerDay ?? undefined,
+            maxTradesPerDay: effectiveMaxTradesPerDay,
             tradesExecutedToday: channelTodaySignals.length,
           };
 

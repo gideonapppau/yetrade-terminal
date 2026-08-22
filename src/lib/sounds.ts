@@ -1,5 +1,7 @@
 // Utility for synthetic UI sounds using Web Audio API
 
+import { logger } from '../core/logger';
+
 let audioCtx: AudioContext | null = null;
 
 function getAudioContext() {
@@ -34,7 +36,7 @@ export const playPop = () => {
     osc.start();
     osc.stop(ctx.currentTime + 0.1);
   } catch (e) {
-    console.error("Audio play failed", e);
+    logger.error({ err: e }, "Audio play failed");
   }
 };
 
@@ -63,7 +65,7 @@ export const playSuccess = () => {
     osc.start();
     osc.stop(ctx.currentTime + 0.4);
   } catch (e) {
-    console.error("Audio play failed", e);
+    logger.error({ err: e }, "Audio play failed");
   }
 };
 
@@ -92,6 +94,6 @@ export const playError = () => {
     osc.start();
     osc.stop(ctx.currentTime + 0.2);
   } catch (e) {
-    console.error("Audio play failed", e);
+    logger.error({ err: e }, "Audio play failed");
   }
 };

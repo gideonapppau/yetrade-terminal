@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { MT5Adapter } from '../core/execution-engine/mt5-adapter';
 import { useSettingsStore } from './settings';
 import { Command } from '@tauri-apps/plugin-shell';
+import { logger } from '../core/logger';
 
 interface MT5State {
   isConnected: boolean;
@@ -15,7 +16,6 @@ interface MT5State {
   company: string | null;
   adapter: MT5Adapter;
   lastSync: Date | null;
-  isInitializing: boolean;
   liveProfits: Record<string, number>;
   setLiveProfits: (profits: Record<string, number>) => void;
   init: () => Promise<void>;
@@ -39,7 +39,6 @@ export const useMT5Store = create<MT5State>((set, get) => ({
   company: null,
   adapter: createAdapter(),
   lastSync: null,
-  isInitializing: false,
   liveProfits: {},
 
   setLiveProfits: (profits) => set({ liveProfits: profits }),
@@ -56,26 +55,13 @@ export const useMT5Store = create<MT5State>((set, get) => ({
   init: async () => {
     set({ isConnecting: true });
     const { adapter, syncAccountInfo, loginBroker } = get();
-    
+
     let connected = await adapter.isConnected();
-    
+
     if (!connected && useSettingsStore.getState().generalSettings.autoStartBridge) {
-       try {
-         console.log("Attempting to auto-start Python Bridge...");
-         const command = Command.create('python', ['python-bridge/main.py']);
-         command.on('error', error => console.error(`Python bridge command error: "${error}"`));
-         
-         const child = await command.spawn();
-         console.log('Python bridge started with PID:', child.pid);
-         
-         // Wait a moment for the server to bind
-         await new Promise(resolve => setTimeout(resolve, 2000));
-         connected = await adapter.isConnected();
-       } catch (err) {
-         console.error('Failed to spawn Python bridge', err);
-       }
+       connected = await tryStartBridge(adapter);
     }
-    
+
     if (!connected) {
        // Attempt auto-login with saved credentials
        const settings = useSettingsStore.getState().executionSettings;
@@ -89,7 +75,7 @@ export const useMT5Store = create<MT5State>((set, get) => ({
              });
              connected = res.success;
           } catch (e) {
-             console.error("Auto-login failed:", e);
+             logger.error({ err: e }, 'MT5 auto-login failed');
           }
        }
     }
@@ -108,9 +94,9 @@ export const useMT5Store = create<MT5State>((set, get) => ({
 
     const info = await adapter.getAccountInfo();
     if (info) {
-      set({ 
-        balance: info.balance, 
-        equity: info.equity, 
+      set({
+        balance: info.balance,
+        equity: info.equity,
         currency: info.currency,
         tradeMode: info.tradeMode ?? null,
         server: info.server ?? null,
@@ -126,32 +112,9 @@ export const useMT5Store = create<MT5State>((set, get) => ({
     }
   },
 
+  // Alias kept for existing callers; there is a single sync implementation.
   syncBalance: async () => {
-    try {
-      const { adapter, isConnected } = get();
-      if (!isConnected) return;
-
-      const info = await adapter.getAccountInfo();
-      if (info) {
-        set({ 
-          balance: info.balance, 
-          equity: info.equity, 
-          currency: info.currency,
-          tradeMode: info.tradeMode ?? null,
-          server: info.server ?? null,
-          company: info.company ?? null,
-          lastSync: new Date()
-        });
-      } else {
-        // Failed to fetch info, might be disconnected
-        const stillConnected = await adapter.isConnected();
-        if (!stillConnected) {
-          set({ isConnected: false });
-        }
-      }
-    } catch (error) {
-      console.error('Failed to sync MT5 balance:', error);
-    }
+    await get().syncAccountInfo();
   },
 
   loginBroker: async (params) => {
@@ -164,3 +127,29 @@ export const useMT5Store = create<MT5State>((set, get) => ({
     return result;
   },
 }));
+
+/**
+ * Spawns the local Python bridge and waits for it to bind. Tries both the
+ * `python` and Windows `py` launchers since either may be missing on a given
+ * machine. Returns true if the bridge becomes reachable afterwards.
+ */
+async function tryStartBridge(adapter: MT5Adapter): Promise<boolean> {
+  const launchers = ['python', 'py'];
+  for (const launcher of launchers) {
+    try {
+      logger.info({ launcher }, 'Attempting to auto-start Python Bridge...');
+      const command = Command.create(launcher, ['python-bridge/main.py']);
+      command.on('error', (error) => logger.error({ err: error, launcher }, 'Python bridge process error'));
+
+      const child = await command.spawn();
+      logger.info({ pid: child.pid, launcher }, 'Python bridge started');
+
+      // Wait a moment for the server to bind
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (await adapter.isConnected()) return true;
+    } catch (err) {
+      logger.warn({ err, launcher }, 'Failed to spawn Python bridge');
+    }
+  }
+  return false;
+}

@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react"
-import { Settings, Save, Smartphone, MonitorDot, Link2, CheckCircle2, Search, PlaySquare, SplitSquareHorizontal, MoveRight, ArrowUpRight, Trash2, RefreshCw, Radio, PencilLine } from "lucide-react"
+import { Settings, Save, Smartphone, MonitorDot, Link2, CheckCircle2, Search, Trash2, RefreshCw, Radio, PencilLine } from "lucide-react"
 import { getDb } from "../db"
 import { telegramChannels } from "../db/schema"
 import { eq } from "drizzle-orm"
 import { useTelegramStore } from "../store/telegram"
 import { useMT5Store } from "../store/mt5"
 import { useSettingsStore } from "../store/settings"
+import { logger } from "../core/logger"
 import type { TelegramChannelInfo } from "../core/telegram/types"
 
 const ChannelAvatar = ({ channelId = "", title = "?", size = 'sm', isActive = true }: { channelId?: string, title?: string, size?: 'sm' | 'lg', isActive?: boolean }) => {
@@ -176,7 +177,7 @@ export function SettingsPage() {
       const all = await db.select().from(telegramChannels)
       setChannels(all)
     } catch (e) {
-      console.error("Failed to load channels", e)
+      logger.error({ err: e }, "Failed to load channels")
     }
   }
 
@@ -195,7 +196,7 @@ export function SettingsPage() {
       const list = await client.listChannels()
       setAvailableChannels(list)
     } catch (e) {
-      console.error("Failed to fetch Telegram chats", e)
+      logger.error({ err: e }, "Failed to fetch Telegram chats")
       setAddError("Could not load your Telegram chats. Try again or enter an ID manually.")
     } finally {
       setIsLoadingChannels(false)
@@ -240,7 +241,7 @@ export function SettingsPage() {
         await loadChannels()
         if (service) service.startListening()
       } catch (e: any) {
-        console.error("Failed to add channel", e)
+        logger.error({ err: e }, "Failed to add channel (manual)")
         setAddError("DB Error: " + (e.message || String(e)))
       }
       return
@@ -269,7 +270,7 @@ export function SettingsPage() {
       await loadChannels()
       if (service) service.startListening()
     } catch (e: any) {
-      console.error("Failed to add channel", e)
+      logger.error({ err: e }, "Failed to add channel")
       setAddError("DB Error: " + (e.message || String(e)))
     }
   }
@@ -305,7 +306,7 @@ export function SettingsPage() {
       await loadChannels()
       if (service) service.startListening()
     } catch (e) {
-      console.error("Failed to toggle channel", e)
+      logger.error({ err: e }, "Failed to toggle channel")
     }
   }
 
@@ -316,7 +317,7 @@ export function SettingsPage() {
       await loadChannels()
       if (service) service.startListening()
     } catch (e) {
-      console.error("Failed to delete channel", e)
+      logger.error({ err: e }, "Failed to delete channel")
     }
   }
 
@@ -339,7 +340,7 @@ export function SettingsPage() {
           >
             Debug DB
           </button>
-          {saveMessage && <span className="text-success text-sm font-medium animate-pulse">{saveMessage}</span>}
+          {saveMessage && <span className="text-success text-sm font-medium">{saveMessage}</span>}
           <button onClick={handleSaveConfig} className="bg-primary text-primary-foreground px-6 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-primary/90 transition-colors">
             <Save size={16} /> Save Config
           </button>
@@ -425,7 +426,7 @@ export function SettingsPage() {
                         <CheckCircle2 size={12} /> Connected
                       </span>
                     ) : connectionState === 'CONNECTING' ? (
-                      <span className="text-xs font-medium text-warning bg-warning/10 px-2 py-1 rounded flex items-center gap-1 animate-pulse">
+                      <span className="text-xs font-medium text-warning bg-warning/10 px-2 py-1 rounded flex items-center gap-1">
                         Connecting...
                       </span>
                     ) : (

@@ -11,9 +11,15 @@ export interface RiskConfiguration {
 
 export interface AccountState {
   balance: number;
+  /** Live account equity; used for floating-drawdown checks when available. */
+  equity?: number;
+  freeMargin?: number;
   openGroupsCount: number;
+  /** Floating drawdown as a percentage of balance (0 = none). */
   currentDrawdown: number;
   dailyLoss: number;
+  /** Sum of risk still committed by open positions, as % of balance. */
+  openRiskPercent?: number;
   maxTradesPerDay?: number | null;
   tradesExecutedToday?: number;
 }

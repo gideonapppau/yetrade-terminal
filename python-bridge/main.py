@@ -126,6 +126,49 @@ def get_positions():
         })
     return jsonify({"success": True, "positions": pos_list})
 
+@app.route("/deals", methods=["GET"])
+def get_deals():
+    """Closed-deal history for one position. Used for realized P&L once a
+    position disappears from /positions."""
+    position = request.args.get("position")
+    if not position:
+        return jsonify({"success": False, "message": "Missing position"}), 400
+
+    deals = mt5.history_deals_get(position=int(position))
+    if deals is None:
+        return jsonify({"success": True, "deals": []})
+
+    deal_list = []
+    for d in deals:
+        deal_list.append({
+            "ticket": d.ticket,
+            "order": d.order,
+            "time": d.time,
+            "entry": "IN" if d.entry == mt5.DEAL_ENTRY_IN else ("OUT" if d.entry == mt5.DEAL_ENTRY_OUT else "INOUT"),
+            "symbol": d.symbol,
+            "volume": float(d.volume),
+            "price": float(d.price),
+            "profit": float(d.profit),
+            "commission": float(d.commission),
+            "swap": float(d.swap),
+        })
+    return jsonify({"success": True, "deals": deal_list})
+
+@app.route("/symbols", methods=["GET"])
+def list_symbols():
+    """Broker symbol names, optionally filtered by substring. Lets clients
+    resolve case/suffix variants (e.g. BTCUSDM -> BTCUSDm on Exness feeds)
+    since MT5 symbol matching is case-sensitive."""
+    query = (request.args.get("query") or "").upper()
+    symbols = mt5.symbols_get()
+    if symbols is None:
+        return jsonify({"success": False, "message": "Failed to get symbols"}), 500
+
+    names = [s.name for s in symbols]
+    if query:
+        names = [n for n in names if query in n.upper()]
+    return jsonify({"success": True, "count": len(names), "symbols": names[:500]})
+
 @app.route("/price", methods=["GET"])
 def get_price():
     symbol = request.args.get("symbol")
@@ -181,6 +224,7 @@ def execute_trade():
     sl = trade.get("sl")
     tp = trade.get("tp")
     magic = int(trade.get("magic", 234000))
+    deviation = int(trade.get("deviation", 20))
 
     if not mt5.symbol_select(symbol, True):
         return jsonify({"success": False, "message": f"Symbol {symbol} not found"}), 400
@@ -198,7 +242,7 @@ def execute_trade():
         "volume": volume,
         "type": order_type,
         "price": price,
-        "deviation": 20,
+        "deviation": deviation,
         "magic": magic,
         "comment": "ACE Terminal",
         "type_time": mt5.ORDER_TIME_GTC,

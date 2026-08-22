@@ -3,6 +3,7 @@ import { motion } from "framer-motion"
 import { Target, RefreshCw } from "lucide-react"
 import { getDb } from "../../db"
 import { trades } from "../../db/schema"
+import { logger } from "../../core/logger"
 
 const container = {
   hidden: { opacity: 0 },
@@ -46,7 +47,7 @@ export function YourAssetsCard() {
           setPairs(sortedPairs)
         }
       } catch (err) {
-        console.error("Failed to fetch trades:", err)
+        logger.error({ err }, "Failed to fetch trades")
       }
     }
     
@@ -79,7 +80,7 @@ export function YourAssetsCard() {
       <motion.div variants={container} initial="hidden" animate="show" className="flex flex-col gap-3">
         {pairs.length === 0 ? (
            <div className="text-sm text-secondary text-center py-8">No trade data available yet.</div>
-        ) : pairs.map((pair, i) => (
+        ) : pairs.map((pair) => (
           <motion.div key={pair.symbol} variants={item} className="flex items-center justify-between p-3 rounded-xl hover:bg-surface/80 transition-colors border border-transparent hover:border-border cursor-pointer">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full flex items-center justify-center bg-blue-500/10 text-blue-500">

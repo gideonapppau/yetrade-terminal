@@ -33,5 +33,21 @@ export const trades = sqliteTable("trades", {
   direction: text("direction").notNull(),
   volume: real("volume").notNull(),
   entryPrice: real("entry_price"),
-  status: text("status").notNull(), // 'OPEN' | 'CLOSED'
+  status: text("status").notNull(), // 'OPEN' | 'CLOSED_WIN' | 'CLOSED_LOSS'
+  /** Realized profit/loss in account currency; null when unknown. */
+  pnl: real("pnl"),
+  /** Epoch ms when the position was detected closed; null while open. */
+  closedAt: integer("closed_at"),
+});
+
+/** Every raw message received from monitored channels, before any parsing. */
+export const telegramMessages = sqliteTable("telegram_messages", {
+  /** `${channelId}:${messageId}` - stable across edits. */
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull(),
+  messageId: text("message_id").notNull(),
+  text: text("text").notNull(),
+  receivedAt: integer("received_at").notNull(),
+  /** Null until Telegram delivers an edit for this message. */
+  editedAt: integer("edited_at"),
 });

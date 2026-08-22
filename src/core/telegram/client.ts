@@ -7,13 +7,14 @@ import { TELEGRAM_CONNECTION_RETRIES, TELEGRAM_DIALOGS_LIMIT } from '../constant
 
 const { TelegramClient } = tg;
 const { StringSession } = sessions;
-const { NewMessage } = events;
+const { NewMessage, Raw } = events;
 
 export class TelegramAdapter {
   private client: InstanceType<typeof TelegramClient> | null = null;
   private state: ConnectionState = 'DISCONNECTED';
   private config: TelegramConfig;
   private messageHandler: ((event: any) => void) | null = null;
+  private rawHandler: ((update: any) => void) | null = null;
 
   constructor(config: TelegramConfig) {
     this.config = config;
@@ -100,50 +101,110 @@ export class TelegramAdapter {
     return channels;
   }
 
-  subscribeToChannels(channelIds: string[], onMessage: (msg: RawTelegramMessage) => void) {
+  subscribeToChannels(
+    channelIds: string[],
+    onMessage: (msg: RawTelegramMessage) => void,
+    onEdit?: (msg: RawTelegramMessage) => void
+  ) {
     if (!this.client || this.state !== 'CONNECTED') {
       throw new Error('Telegram client is not connected');
     }
 
-    // Remove any previous handler so repeated calls don't stack duplicates
+    // Remove any previous handlers so repeated calls don't stack duplicates
     if (this.messageHandler) {
       try {
-        this.client.removeEventHandler(this.messageHandler, new NewMessage({ incoming: true }));
+        this.client.removeEventHandler(this.messageHandler, new NewMessage({}));
       } catch (e) {
-        logger.warn({ e }, 'Failed to remove previous Telegram handler');
+        logger.warn({ e }, 'Failed to remove previous Telegram message handler');
       }
       this.messageHandler = null;
     }
-
-    const handler = (event: any) => {
-      const message = event.message;
-      if (!message.peerId) return;
-
-      // Extract channel ID, keeping it simple for now
-      // GramJS handles peer ID differently depending on Chat/Channel/User
-      let channelId = '';
-      if (message.peerId.className === 'PeerChannel') {
-        channelId = message.peerId.channelId?.toString() || '';
-      } else if (message.peerId.className === 'PeerChat') {
-        channelId = message.peerId.chatId?.toString() || '';
+    if (this.rawHandler) {
+      try {
+        this.client.removeEventHandler(this.rawHandler, new Raw({}));
+      } catch (e) {
+        logger.warn({ e }, 'Failed to remove previous Telegram raw handler');
       }
+      this.rawHandler = null;
+    }
 
-      if (channelIds.includes(channelId)) {
-        const rawMessage: RawTelegramMessage = {
-          channelId,
-          messageId: message.id.toString(),
-          timestamp: new Date(message.date * 1000),
-          text: message.message || '',
-          edited: false,
-        };
+    const extractChannelIds = (message: any): string[] => {
+      const ids: string[] = [];
+      const extract = (peer: any) => {
+        if (!peer) return;
+        if (peer.className === 'PeerChannel') ids.push(peer.channelId?.toString() || '');
+        if (peer.className === 'PeerChat') ids.push(peer.chatId?.toString() || '');
+        if (peer.className === 'PeerUser') ids.push(peer.userId?.toString() || '');
+      };
 
-        logger.info({ channelId, messageId: rawMessage.messageId }, 'Received Telegram message');
-        onMessage(rawMessage);
+      extract(message.peerId);
+      if (message.fwdFrom) {
+        extract(message.fwdFrom.fromId);
       }
+      return ids.filter(Boolean);
     };
 
-    this.messageHandler = handler;
-    this.client.addEventHandler(handler, new NewMessage({ incoming: true }));
+    const matchChannel = (ids: string[]): string | undefined => {
+      for (const channelId of ids) {
+        const found = channelIds.find(id => {
+          const cleanId = id.toString().replace(/^-100/, '');
+          const cleanEventId = channelId.replace(/^-100/, '');
+          return cleanId === cleanEventId;
+        });
+        if (found) return found;
+      }
+      return undefined;
+    };
+
+    const messageHandler = (event: any) => {
+      const message = event.message;
+      if (!message?.peerId) return;
+
+      const ids = extractChannelIds(message);
+      const matchedChannelId = matchChannel(ids);
+      if (!matchedChannelId) return;
+
+      const rawMessage: RawTelegramMessage = {
+        channelId: matchedChannelId,
+        messageId: message.id.toString(),
+        timestamp: new Date(message.date * 1000),
+        text: message.message || '',
+        edited: false,
+      };
+
+      logger.info({ channelId: matchedChannelId, messageId: rawMessage.messageId }, 'Received Telegram message');
+      onMessage(rawMessage);
+    };
+
+    // NewMessage never fires for edits - GramJS delivers those as raw
+    // UpdateEditMessage / UpdateEditChannelMessage updates.
+    const rawHandler = (update: any) => {
+      if (!onEdit) return;
+      if (update?.className !== 'UpdateEditMessage' && update?.className !== 'UpdateEditChannelMessage') return;
+      const message = update.message;
+      if (!message?.peerId) return;
+
+      const ids = extractChannelIds(message);
+      const matchedChannelId = matchChannel(ids);
+      if (!matchedChannelId) return;
+
+      const editTimestamp = message.editDate ?? message.date;
+      const rawEdit: RawTelegramMessage = {
+        channelId: matchedChannelId,
+        messageId: message.id.toString(),
+        timestamp: new Date(editTimestamp * 1000),
+        text: message.message || '',
+        edited: true,
+      };
+
+      logger.info({ channelId: matchedChannelId, messageId: rawEdit.messageId }, 'Received Telegram message edit');
+      onEdit(rawEdit);
+    };
+
+    this.messageHandler = messageHandler;
+    this.rawHandler = rawHandler;
+    this.client.addEventHandler(messageHandler, new NewMessage({}));
+    this.client.addEventHandler(rawHandler, new Raw({}));
 
     logger.info({ channels: channelIds.length }, 'Subscribed to Telegram channels');
   }
@@ -158,13 +219,13 @@ export class TelegramAdapter {
     }
     
     try {
-      // Use isBigInt to safely parse channel IDs if they start with -100
+      // Use isBigInt to safely parse channel IDs (GramJS expects BigInt for IDs)
       let peerId: any = peer;
-      if (peer.startsWith('-100')) {
+      if (/^-?\d+$/.test(peer)) {
         try {
           peerId = tg.helpers.returnBigInt(peer);
         } catch {
-          // Not a valid -100 prefixed big int; fall back to raw string peer
+          // Not a valid big int; fall back to raw string peer
         }
       }
       

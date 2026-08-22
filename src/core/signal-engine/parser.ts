@@ -12,13 +12,13 @@ import { logger } from '../logger';
  */
 export class RegexParser implements SignalParser {
   version(): string {
-    return '1.1.0';
+    return '1.2.0';
   }
 
   canParse(message: string): boolean {
     const upperMsg = message.toUpperCase();
     return (upperMsg.includes('BUY') || upperMsg.includes('SELL')) && 
-           (upperMsg.includes('SL') || upperMsg.includes('STOP LOSS'));
+           (upperMsg.includes('SL') || upperMsg.includes('S/L') || upperMsg.includes('STOP') || upperMsg.includes('TP') || upperMsg.includes('T/P') || upperMsg.includes('TARGET'));
   }
 
   parse(message: string): ParsedSignal | null {
@@ -37,7 +37,9 @@ export class RegexParser implements SignalParser {
         direction = pairMatch[2] as TradeDirection;
       } else {
         // Try format: BUY GOLD @ 4068
-        const buySellMatch = upperMsg.match(/(BUY|SELL)\s+([A-Z0-9]+)\s*(?:@|AT)?\s*([\d.]+)/);
+        // Label words (TARGET/TP/...) are excluded so messages like
+        // "XAUUSD BUY TARGET 3400" don't parse TARGET as the symbol.
+        const buySellMatch = upperMsg.match(/(BUY|SELL)\s+(?!TARGET\b|TGT\b|T\/P\b|TP\b)([A-Z0-9]+)\s*(?:@|AT)?\s*([\d.]+)/);
         if (buySellMatch) {
           direction = buySellMatch[1] as TradeDirection;
           symbol = buySellMatch[2];
@@ -63,19 +65,28 @@ export class RegexParser implements SignalParser {
       }
 
       // 3. Extract Stop Loss (Required)
-      const slMatch = upperMsg.match(/(?:STOP\s*LOSS|SL)[\s:]*([\d.]+)/);
+      const slMatch = upperMsg.match(/(?:STOP(?:[\s_]*LOSS)?|SL|S\/L)[\s:-]*([\d.]+)/);
       if (!slMatch) return null;
       const stopLoss = parseFloat(slMatch[1]);
 
       // 4. Extract Take Profits
       const takeProfits: TakeProfit[] = [];
-      const tpRegex = /(?:TAKE\s*PROFIT|TP)[\s\d]*:\s*([\d.]+)/g;
+      // A numbered label ("TP1:", "TARGET 2:") is only consumed when directly
+      // followed by a : or - separator; otherwise "TP 3400" would grab the
+      // label digits as part of the price.
+      const tpRegex = /(?:TAKE(?:[\s_]*PROFIT)?|TP|T\/P|TARGET|TGT)(?:\s*\d{1,2}\s*[:\-]\s*|\s*[:\-]?\s*)([\d.]+)/g;
       let tpMatch;
       while ((tpMatch = tpRegex.exec(upperMsg)) !== null) {
-        takeProfits.push({ price: parseFloat(tpMatch[1]) });
+        // Prevent matching entry or SL accidentally if formatting is weird
+        const val = parseFloat(tpMatch[1]);
+        if (val !== entry && val !== stopLoss) {
+          takeProfits.push({ price: val });
+        }
       }
 
-      if (takeProfits.length === 0) return null;
+      // If no TP found, we can still parse the signal, TP is optional in some systems
+      // or managed by trailing stop.
+
 
       return {
         symbol,

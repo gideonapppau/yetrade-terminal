@@ -3,6 +3,7 @@ import { motion } from "framer-motion"
 import { Award } from "lucide-react"
 import { getDb } from "../../db"
 import { telegramChannels } from "../../db/schema"
+import { logger } from "../../core/logger"
 
 const container = {
   hidden: { opacity: 0 },
@@ -30,7 +31,7 @@ export function MarketLeadersCard() {
           setChannels(data)
         }
       } catch (err) {
-        console.error("Failed to fetch channels:", err)
+        logger.error({ err }, "Failed to fetch channels")
       }
     }
     

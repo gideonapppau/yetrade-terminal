@@ -102,7 +102,7 @@ export function DashboardLayout({ children, activePage, onPageChange, onOpenComm
         {/* Right Actions */}
         <div className="flex items-center gap-6">
           {tradingPaused && (
-            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-destructive/15 border border-destructive/30 text-destructive text-[10px] font-bold tracking-wider animate-pulse">
+            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-destructive/15 border border-destructive/30 text-destructive text-[10px] font-bold tracking-wider">
               <span className="w-1.5 h-1.5 rounded-full bg-destructive"></span>
               TRADING PAUSED
             </span>
@@ -220,7 +220,7 @@ export function DashboardLayout({ children, activePage, onPageChange, onOpenComm
             <span className="text-secondary font-bold">MT5 Bridge</span>
             {mt5Connected ? (
               <span className="flex items-center gap-1.5 text-success font-bold">
-                <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>
+                <span className="w-1.5 h-1.5 rounded-full bg-success"></span>
                 Connected
               </span>
             ) : (
@@ -235,12 +235,12 @@ export function DashboardLayout({ children, activePage, onPageChange, onOpenComm
             <span className="text-secondary font-bold">Telegram API</span>
             {connectionState === 'CONNECTED' ? (
               <span className="flex items-center gap-1.5 text-success font-bold">
-                <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>
+                <span className="w-1.5 h-1.5 rounded-full bg-success"></span>
                 Connected
               </span>
             ) : connectionState === 'CONNECTING' ? (
               <span className="flex items-center gap-1.5 text-warning font-bold">
-                <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse"></span>
+                <span className="w-1.5 h-1.5 rounded-full bg-warning"></span>
                 Connecting
               </span>
             ) : (
@@ -254,7 +254,7 @@ export function DashboardLayout({ children, activePage, onPageChange, onOpenComm
           <div className="flex items-center gap-2">
             <span className="text-secondary font-bold">Local DB</span>
             <span className="flex items-center gap-1.5 text-success font-bold">
-              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>
+              <span className="w-1.5 h-1.5 rounded-full bg-success"></span>
               Synced
             </span>
           </div>

@@ -171,7 +171,8 @@ export function SignalsPage() {
                 messageId: Date.now().toString(),
                 channelId: "12345",
                 text: `${symbol} BUY\nENTRY: ${entry.toFixed(2)}\nSL: ${sl.toFixed(2)}\nTP: ${tp.toFixed(2)}`,
-                timestamp: new Date()
+                timestamp: new Date(),
+                edited: false
               });
             }}
             className="px-4 py-1.5 bg-accent/10 text-accent border border-accent/20 rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-all flex items-center gap-2"

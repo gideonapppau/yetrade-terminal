@@ -43,6 +43,33 @@ pub fn run() {
         );
       ",
         kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 2,
+        description: "add_pnl_to_trades",
+        sql: "ALTER TABLE trades ADD COLUMN pnl REAL;",
+        kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 3,
+        description: "create_telegram_messages",
+        sql: "
+        CREATE TABLE IF NOT EXISTS telegram_messages (
+          id TEXT PRIMARY KEY,
+          channel_id TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          text TEXT NOT NULL,
+          received_at INTEGER NOT NULL,
+          edited_at INTEGER
+        );
+        ",
+        kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 4,
+        description: "add_closed_at_to_trades",
+        sql: "ALTER TABLE trades ADD COLUMN closed_at INTEGER;",
+        kind: MigrationKind::Up,
     }];
 
     tauri::Builder::default()

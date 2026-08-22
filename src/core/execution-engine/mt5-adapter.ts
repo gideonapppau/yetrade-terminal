@@ -1,9 +1,12 @@
-import type { BrokerAdapter, ExecutionRequest, ExecutionResult } from './types';
+import type { BrokerAdapter, ExecutionRequest, ExecutionResult, SymbolInfo, OpenPosition, PositionDeal } from './types';
 import { logger } from '../logger';
 import { MT5_BRIDGE_DEFAULT_URL, MIN_POSITION_SIZE_LOTS } from '../constants';
+import { useSettingsStore } from '../../store/settings';
 
 export class MT5Adapter implements BrokerAdapter {
   private baseUrl: string;
+  /** Broker-exact symbol names keyed by the requested (uppercased) symbol. */
+  private symbolCache = new Map<string, string>();
 
   name = 'MetaTrader 5 Bridge';
 
@@ -12,11 +15,63 @@ export class MT5Adapter implements BrokerAdapter {
   }
 
   setBaseUrl(url: string) {
+    if (url !== this.baseUrl) {
+      // A different bridge means a different broker feed - drop stale mappings
+      this.symbolCache.clear();
+    }
     this.baseUrl = url;
   }
 
   getBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  /**
+   * Resolve a signal symbol to the broker's exact instrument name.
+   * Signal providers post e.g. "BTCUSD"/"BTCUSDM" while brokers expose
+   * "BTCUSDm" / "XAUUSD.a"-style names, and MT5 matching is case-sensitive -
+   * an unresolved symbol makes every order fail with "Symbol not found".
+   */
+  async resolveSymbol(symbol: string): Promise<string> {
+    const key = symbol.trim().toUpperCase();
+    if (!key) return symbol;
+
+    const cached = this.symbolCache.get(key);
+    if (cached) return cached;
+
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/symbols?query=${encodeURIComponent(key.slice(0, 6))}`
+      );
+      if (!response.ok) return symbol;
+      const data = await response.json();
+      const names: string[] = data.success ? data.symbols : [];
+      if (!names.length) return symbol;
+
+      const commit = (resolved: string) => {
+        logger.info({ requested: symbol, resolved }, 'Resolved broker symbol');
+        this.symbolCache.set(key, resolved);
+        return resolved;
+      };
+
+      const exact = names.find((n) => n === symbol.trim() || n.toUpperCase() === key);
+      if (exact) return commit(exact);
+
+      const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const target = norm(key);
+      const candidates = names
+        .filter((n) => norm(n).startsWith(target))
+        .sort((a, b) => a.length - b.length);
+      if (candidates.length > 0) {
+        // Prefer the shortest match - closest to the base instrument
+        return commit(candidates[0]);
+      }
+
+      return symbol;
+    } catch (e) {
+      logger.error({ err: e, symbol }, 'Broker symbol resolution failed');
+      return symbol;
+    }
   }
 
   async isConnected(): Promise<boolean> {
@@ -50,18 +105,29 @@ export class MT5Adapter implements BrokerAdapter {
     try {
       // Fallback until the risk engine always supplies a computed size
       const volume = request.positionSize > 0 ? request.positionSize : MIN_POSITION_SIZE_LOTS;
-      
+
+      // Slippage tolerance (max deviation in points) comes from risk config;
+      // floored at 1 since MT5 treats 0 as "no slippage allowed".
+      const maxSlippagePoints = Math.max(
+        1,
+        Math.round(useSettingsStore.getState().riskConfig.maxSlippagePoints)
+      );
+
+      // Route to the broker's exact instrument name (case/suffix tolerant)
+      const symbol = await this.resolveSymbol(request.signal.symbol);
+
       const response = await fetch(`${this.baseUrl}/trade/execute`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          symbol: request.signal.symbol,
+          symbol,
           action: request.signal.direction,
           volume: volume,
           sl: request.signal.stopLoss,
           tp: request.signal.takeProfits?.[0]?.price, // Use TP1
+          deviation: maxSlippagePoints,
         }),
       });
 
@@ -96,7 +162,7 @@ export class MT5Adapter implements BrokerAdapter {
     }
   }
 
-  async getOpenPositions(): Promise<any[]> {
+  async getOpenPositions(): Promise<OpenPosition[]> {
     try {
       const response = await fetch(`${this.baseUrl}/positions`);
       if (!response.ok) return [];
@@ -110,7 +176,8 @@ export class MT5Adapter implements BrokerAdapter {
 
   async getSymbolPrice(symbol: string): Promise<{ ask: number; bid: number } | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/price?symbol=${encodeURIComponent(symbol)}`);
+      const resolved = await this.resolveSymbol(symbol);
+      const response = await fetch(`${this.baseUrl}/price?symbol=${encodeURIComponent(resolved)}`);
       if (!response.ok) return null;
       const data = await response.json();
       return data.success ? { ask: data.ask, bid: data.bid } : null;
@@ -120,9 +187,10 @@ export class MT5Adapter implements BrokerAdapter {
     }
   }
 
-  async getSymbolInfo(symbol: string): Promise<{ trade_tick_value: number; trade_tick_size: number; trade_contract_size: number; volume_min: number; volume_step: number; point: number } | null> {
+  async getSymbolInfo(symbol: string): Promise<SymbolInfo | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/symbol_info?symbol=${encodeURIComponent(symbol)}`);
+      const resolved = await this.resolveSymbol(symbol);
+      const response = await fetch(`${this.baseUrl}/symbol_info?symbol=${encodeURIComponent(resolved)}`);
       if (!response.ok) return null;
       const data = await response.json();
       return data.success ? {
@@ -135,6 +203,18 @@ export class MT5Adapter implements BrokerAdapter {
       } : null;
     } catch (e) {
       logger.error({ err: e }, 'MT5 symbol info fetch failed');
+      return null;
+    }
+  }
+
+  async getDeals(positionTicket: string | number): Promise<PositionDeal[] | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/deals?position=${encodeURIComponent(String(positionTicket))}`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data.success ? data.deals : null;
+    } catch (e) {
+      logger.error({ err: e, positionTicket }, 'MT5 deals fetch failed');
       return null;
     }
   }

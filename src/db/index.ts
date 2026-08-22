@@ -2,11 +2,13 @@
 // Drizzle supports a custom driver for Tauri, or we can use the community tauri-sql package.
 
 import { drizzle } from 'drizzle-orm/sqlite-proxy';
+import type { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
 import Database from '@tauri-apps/plugin-sql';
 import * as schema from './schema';
 import { SQLITE_DB_HANDLE } from '../core/constants';
+import { logger } from '../core/logger';
 
-let dbInstance: any = null;
+let dbInstance: SqliteRemoteDatabase<typeof schema> | null = null;
 
 export async function getDb() {
   if (dbInstance) return dbInstance;
@@ -65,27 +67,51 @@ export async function getDb() {
         direction TEXT NOT NULL,
         volume REAL NOT NULL,
         entry_price REAL,
-        status TEXT NOT NULL
+        status TEXT NOT NULL,
+        pnl REAL,
+        closed_at INTEGER
+      );
+    `);
+
+    // Upgrade legacy databases that pre-date the pnl column
+    try {
+      await sqlite.execute(`ALTER TABLE trades ADD COLUMN pnl REAL;`);
+    } catch {
+      // Column already exists - safe to ignore
+    }
+
+    // Upgrade legacy databases that pre-date the closed_at column
+    try {
+      await sqlite.execute(`ALTER TABLE trades ADD COLUMN closed_at INTEGER;`);
+    } catch {
+      // Column already exists - safe to ignore
+    }
+
+    await sqlite.execute(`
+      CREATE TABLE IF NOT EXISTS telegram_messages (
+        id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        text TEXT NOT NULL,
+        received_at INTEGER NOT NULL,
+        edited_at INTEGER
       );
     `);
     
     dbInstance = drizzle(
       async (sql, params, method) => {
-        console.log(`[DB] ${method} -> ${sql}`, params);
         // Map Drizzle methods to Tauri SQL methods
         if (method === 'run') {
           try {
             await sqlite.execute(sql, params);
-            console.log(`[DB] run success`);
           } catch(e) {
-            console.error(`[DB] run error`, e);
+            logger.error({ err: e, sql }, '[DB] run failed');
             throw e;
           }
           return { rows: [] };
         } else if (method === 'all' || method === 'values' || method === 'get') {
           try {
             const results = await sqlite.select<any[]>(sql, params);
-            console.log(`[DB] select raw results:`, results);
             if (results.length === 0) return { rows: [] };
 
             // Extract requested column order from SELECT statement to avoid JSON key sorting issues
@@ -98,23 +124,15 @@ export async function getDb() {
               const mapRow = (row: any) => cols.map(c => row[c] ?? row[`telegram_channels.${c}`] ?? row[Object.keys(row).find(k => k.endsWith(`.${c}`)) || c]);
               
               const mapped = method === 'get' ? mapRow(results[0]) : results.map(mapRow);
-              console.log(`[DB] select mapped results:`, mapped);
-              
-              if (method === 'get') {
-                return { rows: mapped };
-              }
+
               return { rows: mapped };
             }
 
             const mapped = method === 'get' ? Object.values(results[0]) : results.map(Object.values);
-            console.log(`[DB] select unmapped results:`, mapped);
-            
-            if (method === 'get') {
-              return { rows: mapped };
-            }
+
             return { rows: mapped };
           } catch (e) {
-            console.error(`[DB] select error`, e);
+            logger.error({ err: e, sql }, '[DB] select failed');
             throw e;
           }
         }
@@ -123,15 +141,15 @@ export async function getDb() {
       { schema }
     );
   } catch (e) {
-    console.warn("Failed to load Tauri SQL plugin. Using mock localStorage database. Error:", e);
+    logger.warn({ err: e }, "Tauri SQL plugin unavailable - using mock localStorage database");
     // Provide a safe fallback mock so the UI works in browser mode
     dbInstance = drizzle(
       async (sql, params, method) => {
-        console.log("[Mock DB]", method, sql, params);
         let channels = JSON.parse(localStorage.getItem('mock_telegram_channels') || '[]');
         let mockSignals = JSON.parse(localStorage.getItem('mock_signals') || '[]');
         let mockTrades = JSON.parse(localStorage.getItem('mock_trades') || '[]');
-        
+        let mockMessages = JSON.parse(localStorage.getItem('mock_telegram_messages') || '[]');
+
         const lowerSql = sql.toLowerCase();
         
         // ------------------ CHANNELS ------------------
@@ -201,18 +219,64 @@ export async function getDb() {
             direction: params[3],
             volume: params[4],
             entry_price: params[5],
-            status: params[6]
+            status: params[6],
+            pnl: params[7] ?? null,
+            closed_at: params[8] ?? null
           });
           localStorage.setItem('mock_trades', JSON.stringify(mockTrades));
           return { rows: [] };
         }
 
         if (lowerSql.includes('update "trades"')) {
-          if (lowerSql.includes('set "status" = ?')) {
+          if (lowerSql.includes('set "status" = ?, "pnl" = ?, "closed_at" = ?')) {
+            mockTrades = mockTrades.map((t: any) => t.id === params[3] ? { ...t, status: params[0], pnl: params[1], closed_at: params[2] } : t);
+            localStorage.setItem('mock_trades', JSON.stringify(mockTrades));
+          } else if (lowerSql.includes('set "status" = ?, "pnl" = ?')) {
+            mockTrades = mockTrades.map((t: any) => t.id === params[2] ? { ...t, status: params[0], pnl: params[1] } : t);
+            localStorage.setItem('mock_trades', JSON.stringify(mockTrades));
+          } else if (lowerSql.includes('set "status" = ?')) {
             mockTrades = mockTrades.map((t: any) => t.id === params[1] ? { ...t, status: params[0] } : t);
             localStorage.setItem('mock_trades', JSON.stringify(mockTrades));
           }
           return { rows: [] };
+        }
+
+        // ------------------ RAW TELEGRAM MESSAGES ------------------
+        if (lowerSql.includes('insert into "telegram_messages"')) {
+          const exists = mockMessages.find((m: any) => m.id === params[0]);
+          if (!exists) {
+            mockMessages.push({
+              id: params[0],
+              channel_id: params[1],
+              message_id: params[2],
+              text: params[3],
+              received_at: params[4],
+              edited_at: params[5] ?? null
+            });
+            localStorage.setItem('mock_telegram_messages', JSON.stringify(mockMessages));
+          }
+          return { rows: [] };
+        }
+
+        if (lowerSql.includes('update "telegram_messages"')) {
+          if (lowerSql.includes('"text" = ?') && lowerSql.includes('"edited_at" = ?')) {
+            mockMessages = mockMessages.map((m: any) =>
+              m.id === params[2] ? { ...m, text: params[0], edited_at: params[1] } : m
+            );
+            localStorage.setItem('mock_telegram_messages', JSON.stringify(mockMessages));
+          }
+          return { rows: [] };
+        }
+
+        if (lowerSql.includes('from "telegram_messages"')) {
+          let results: any[] = mockMessages;
+          if (lowerSql.includes('where "telegram_messages"."id" = ?')) {
+            results = results.filter((m: any) => m.id === params[0]);
+          }
+          if (results.length > 0 && method === 'get') {
+            return { rows: Object.values(results[0]) };
+          }
+          return { rows: method === 'get' ? [] : results.map(Object.values) };
         }
 
         // ------------------ SELECTS ------------------
