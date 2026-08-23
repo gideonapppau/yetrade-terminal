@@ -3,6 +3,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
 import atexit
+import threading
 import time
 
 app = Flask(__name__)
@@ -10,6 +11,27 @@ CORS(app)  # Allow requests from Tauri
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- Execution idempotency -------------------------------------------------
+# Clients key each order leg (signalId#splitIndex). If a request times out and
+# is retried, the cached result is replayed instead of opening a duplicate
+# position. In-memory only: it protects against transport-level retries while
+# this bridge process is alive.
+_exec_lock = threading.Lock()
+_exec_results = {}
+EXEC_CACHE_MAX_ENTRIES = 500
+
+
+def _exec_cache_get(key):
+    with _exec_lock:
+        return _exec_results.get(key)
+
+
+def _exec_cache_put(key, payload):
+    with _exec_lock:
+        if len(_exec_results) >= EXEC_CACHE_MAX_ENTRIES:
+            _exec_results.pop(next(iter(_exec_results)))
+        _exec_results[key] = payload
 
 # --- Lifecycle ---
 def shutdown_event():
@@ -237,6 +259,14 @@ def execute_trade():
     if not trade:
         return jsonify({"detail": "Invalid request body"}), 400
 
+    # Idempotent replay: a retried leg returns its original result untouched
+    idempotency_key = trade.get("idempotencyKey")
+    if idempotency_key:
+        cached = _exec_cache_get(idempotency_key)
+        if cached is not None:
+            logger.info(f"Idempotent replay for {idempotency_key} - returning cached result")
+            return jsonify(cached)
+
     symbol = trade.get("symbol")
     action = trade.get("action")
     volume = float(trade.get("volume", 0.01))
@@ -350,13 +380,16 @@ def execute_trade():
         if result.retcode == mt5.TRADE_RETCODE_DONE:
             filled = float(result.price) if result.price else exec_price
             logger.info(f"Order placed successfully. Ticket: {result.order} @ {filled}")
-            return jsonify({
+            payload = {
                 "success": True,
                 "ticket": result.order,
                 "price": filled,
                 "volume": float(result.volume or volume),
                 "message": "Order executed successfully"
-            })
+            }
+            if idempotency_key:
+                _exec_cache_put(idempotency_key, payload)
+            return jsonify(payload)
         last_msg = f"retcode={result.retcode} ({getattr(result, 'comment', '')})"
         logger.error(f"Order attempt failed with filling={mode}: {last_msg}")
         if result.retcode not in retryable_retcode:
@@ -374,10 +407,27 @@ def close_trade():
     position = mt5.positions_get(ticket=ticket)
     if not position or len(position) == 0:
         return jsonify({"success": False, "message": "Position not found"}), 404
-        
+
     pos = position[0]
     symbol = pos.symbol
     lot = pos.volume
+
+    # Optional partial close: clamp to a valid broker volume range
+    requested_volume = data.get("volume")
+    if requested_volume is not None:
+        info = mt5.symbol_info(symbol)
+        vol_min = float(getattr(info, "volume_min", 0.01) or 0.01)
+        try:
+            requested_volume = float(requested_volume)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "Invalid volume"}), 400
+        if requested_volume >= pos.volume:
+            lot = pos.volume  # rounds up to a full close
+        elif requested_volume < vol_min:
+            return jsonify({"success": False, "message": f"Partial volume below broker minimum ({vol_min})"}), 400
+        else:
+            lot = requested_volume
+
     order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
     price = mt5.symbol_info_tick(symbol).bid if order_type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
 

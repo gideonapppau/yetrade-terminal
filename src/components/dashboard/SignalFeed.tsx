@@ -72,9 +72,18 @@ export function SignalFeed() {
                 </div>
                 
                 <div className="text-right">
+                  {signal.provisional && (
+                    <span className={`block mb-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      signal.provisional === 'ARMED'
+                        ? 'bg-warning/15 text-warning animate-pulse'
+                        : 'bg-accent/15 text-accent'
+                    }`}>
+                      {signal.provisional === 'ARMED' ? 'AWAITING LEVELS' : 'ADJUSTED'}
+                    </span>
+                  )}
                   <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                    signal.decision === 'APPROVED' ? 'bg-success/20 text-success' : 
-                    signal.decision === 'REJECTED' ? 'bg-destructive/20 text-destructive' : 
+                    signal.decision === 'APPROVED' ? 'bg-success/20 text-success' :
+                    signal.decision === 'REJECTED' ? 'bg-destructive/20 text-destructive' :
                     'bg-gray-800 text-gray-400'
                   }`}>
                     {signal.decision}

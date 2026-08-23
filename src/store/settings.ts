@@ -27,6 +27,18 @@ export interface ExecutionSettings {
   trailingStopEnabled: boolean;
   trailingStopTriggerPips: number;
   trailingStopDistancePips: number;
+  /**
+   * Instant-entry defaults for fast channels that post direction first and
+   * levels later (see the per-channel instant_entry flag).
+   */
+  /** Provisional stop distance used to size and place the blind entry. */
+  instantEntryStopPips: number;
+  /** Provisional take-profit distance expressed as a multiple of risk (R). */
+  instantTargetRR: number;
+  /** How long after posting an edit/completion may arrive and be honored. */
+  instantEditWindowSeconds: number;
+  /** What happens to a provisional trade when no valid edit arrives in time. */
+  instantExpiryAction: 'CLOSE' | 'KEEP';
 }
 
 export interface TradingSettings {
@@ -58,6 +70,8 @@ export const DEFAULT_SETTINGS: TradingSettings = {
     maxOpenRiskPercent: 5.0,
     maxSlippagePoints: 30,
     newsFilterEnabled: false,
+    // Legacy behavior: round sub-minimum sizes UP to the broker minimum.
+    rejectBelowMinVolume: false,
   },
   generalSettings: {
     displayLanguage: 'English (US)',
@@ -76,6 +90,10 @@ export const DEFAULT_SETTINGS: TradingSettings = {
     trailingStopEnabled: false,
     trailingStopTriggerPips: 30,
     trailingStopDistancePips: 15,
+    instantEntryStopPips: 200,
+    instantTargetRR: 2,
+    instantEditWindowSeconds: 60,
+    instantExpiryAction: 'CLOSE',
   }
 };
 
@@ -98,7 +116,8 @@ export const useSettingsStore = create<SettingsState>()(
       name: 'trading-settings',
       // Never persist the broker password to disk.
       partialize: (state) => {
-        const { mt5Password, ...executionSettings } = state.executionSettings;
+        // Session-only secret: dropped from the persisted snapshot.
+        const { mt5Password: _mt5Password, ...executionSettings } = state.executionSettings;
         return {
           accountBalance: state.accountBalance,
           riskConfig: state.riskConfig,

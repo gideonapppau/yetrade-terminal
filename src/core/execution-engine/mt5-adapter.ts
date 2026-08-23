@@ -131,6 +131,9 @@ export class MT5Adapter implements BrokerAdapter {
           // live market price at execution time (prevents invalid-stop rejections)
           entry: request.signal.entry ?? null,
           deviation: maxSlippagePoints,
+          // Lets the bridge dedupe retries (e.g. after a network timeout) so
+          // the same signal leg can never open a second position.
+          idempotencyKey: `${request.signalId}#${request.splitIndex ?? 0}`,
         }),
       });
 
@@ -227,12 +230,12 @@ export class MT5Adapter implements BrokerAdapter {
     }
   }
 
-  async closeTrade(ticket: string | number): Promise<{ success: boolean; message: string }> {
+  async closeTrade(ticket: string | number, volume?: number): Promise<{ success: boolean; message: string }> {
     try {
       const response = await fetch(`${this.baseUrl}/trade/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticket: Number(ticket) }),
+        body: JSON.stringify({ ticket: Number(ticket), ...(volume != null ? { volume } : {}) }),
       });
       return await response.json();
     } catch (e) {

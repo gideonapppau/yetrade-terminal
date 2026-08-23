@@ -15,6 +15,8 @@ export interface UiSignal {
   outcome?: 'EXECUTED' | 'MISSED';
   reason?: string;
   raw: string;
+  /** Instant-entry lifecycle badge: armed = awaiting provider levels. */
+  provisional?: 'ARMED' | 'ADJUSTED';
   validation: { text: string; status: boolean }[];
 }
 
@@ -24,6 +26,9 @@ interface SignalState {
   clearSignals: () => void;
 }
 
+/** Upper bound on persisted signals so localStorage cannot grow forever. */
+const MAX_PERSISTED_SIGNALS = 200;
+
 export const useSignalStore = create<SignalState>()(
   persist(
     (set) => ({
@@ -32,7 +37,7 @@ export const useSignalStore = create<SignalState>()(
         set((state) =>
           state.signals.some((s) => s.id === signal.id)
             ? state
-            : { signals: [signal, ...state.signals] }
+            : { signals: [signal, ...state.signals].slice(0, MAX_PERSISTED_SIGNALS) }
         ),
       clearSignals: () => set({ signals: [] }),
     }),

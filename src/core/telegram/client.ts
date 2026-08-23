@@ -189,6 +189,7 @@ export class TelegramAdapter {
       if (!matchedChannelId) return;
 
       const editTimestamp = message.editDate ?? message.date;
+      if (!editTimestamp) return;
       const rawEdit: RawTelegramMessage = {
         channelId: matchedChannelId,
         messageId: message.id.toString(),

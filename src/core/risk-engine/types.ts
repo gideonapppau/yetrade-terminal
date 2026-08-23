@@ -7,6 +7,18 @@ export interface RiskConfiguration {
   maxOpenRiskPercent: number;
   maxSlippagePoints: number;
   newsFilterEnabled: boolean;
+  /**
+   * Signals without take-profit targets are allowed when a trailing stop
+   * manages the exit; otherwise they are rejected (RR is uncomputable).
+   * Optional so persisted configs predating this flag stay valid.
+   */
+  trailingStopManagedTps?: boolean;
+  /**
+   * Reject trades whose computed lot size falls below the broker minimum.
+   * When false (legacy behavior) the size is rounded up to the minimum,
+   * which risks more than the configured percentage on small accounts.
+   */
+  rejectBelowMinVolume?: boolean;
 }
 
 export interface AccountState {

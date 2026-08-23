@@ -38,6 +38,8 @@ export async function getDb() {
     for (const alter of [
       `ALTER TABLE telegram_channels ADD COLUMN risk_per_trade REAL;`,
       `ALTER TABLE telegram_channels ADD COLUMN max_trades_per_day INTEGER;`,
+      `ALTER TABLE telegram_channels ADD COLUMN instant_entry INTEGER;`,
+      `ALTER TABLE signals ADD COLUMN is_provisional INTEGER;`,
     ]) {
       try {
         await sqlite.execute(alter);
@@ -156,13 +158,14 @@ export async function getDb() {
         if (lowerSql.includes('insert into "telegram_channels"')) {
           const exists = channels.find((c: any) => c.id === params[0]);
           if (exists) throw new Error("UNIQUE constraint failed");
-          channels.push({ 
-            id: params[0], 
-            name: params[1], 
-            channel_id: params[2], 
+          channels.push({
+            id: params[0],
+            name: params[1],
+            channel_id: params[2],
             is_active: params[3],
             risk_per_trade: params[4] ?? null,
-            max_trades_per_day: params[5] ?? null
+            max_trades_per_day: params[5] ?? null,
+            instant_entry: params[6] ?? null
           });
           localStorage.setItem('mock_telegram_channels', JSON.stringify(channels));
           return { rows: [] };
@@ -171,6 +174,8 @@ export async function getDb() {
         if (lowerSql.includes('update "telegram_channels"')) {
           if (lowerSql.includes('set "is_active" = ?') && lowerSql.includes('"name" = ?')) {
             channels = channels.map((c: any) => c.id === params[2] ? { ...c, is_active: params[0], name: params[1] } : c);
+          } else if (lowerSql.includes('set "instant_entry" = ?')) {
+            channels = channels.map((c: any) => c.id === params[1] ? { ...c, instant_entry: params[0] } : c);
           } else if (lowerSql.includes('set "is_active" = ?')) {
             channels = channels.map((c: any) => c.id === params[1] ? { ...c, is_active: params[0] } : c);
           } else if (lowerSql.includes('set "risk_per_trade" = ?, "max_trades_per_day" = ?')) {
@@ -197,16 +202,25 @@ export async function getDb() {
             stop_loss: params[5],
             status: params[6],
             received_at: params[7],
+            is_provisional: params[8] ?? null,
           });
           localStorage.setItem('mock_signals', JSON.stringify(mockSignals));
           return { rows: [] };
         }
 
         if (lowerSql.includes('update "signals"')) {
-          if (lowerSql.includes('set "status" = ?')) {
+          if (lowerSql.includes('set "status" = ?, "is_provisional" = ?')) {
+            mockSignals = mockSignals.map((s: any) =>
+              s.id === params[2] ? { ...s, status: params[0], is_provisional: params[1] } : s
+            );
+          } else if (lowerSql.includes('set "is_provisional" = ?')) {
+            mockSignals = mockSignals.map((s: any) => s.id === params[1] ? { ...s, is_provisional: params[0] } : s);
+          } else if (lowerSql.includes('set "entry" = ?, "stop_loss" = ?')) {
+            mockSignals = mockSignals.map((s: any) => s.id === params[2] ? { ...s, entry: params[0], stop_loss: params[1] } : s);
+          } else if (lowerSql.includes('set "status" = ?')) {
             mockSignals = mockSignals.map((s: any) => s.id === params[1] ? { ...s, status: params[0] } : s);
-            localStorage.setItem('mock_signals', JSON.stringify(mockSignals));
           }
+          localStorage.setItem('mock_signals', JSON.stringify(mockSignals));
           return { rows: [] };
         }
 
@@ -296,14 +310,20 @@ export async function getDb() {
             results = mockSignals;
             if (lowerSql.includes('where ("signals"."status" = ? and "signals"."received_at" >= ?)')) {
               results = mockSignals.filter((s: any) => s.status === params[0] && s.received_at >= params[1]);
+            } else if (lowerSql.includes('where ("signals"."is_provisional" = ? and "signals"."status" = ?)')) {
+              results = mockSignals.filter((s: any) => s.is_provisional === params[0] && s.status === params[1]);
             } else if (lowerSql.includes('where "signals"."id" = ?')) {
               results = mockSignals.filter((s: any) => s.id === params[0]);
+            } else if (lowerSql.includes('where "signals"."channel_id" = ?')) {
+              results = mockSignals.filter((s: any) => s.channel_id === params[0]);
             } else if (lowerSql.includes('where "signals"."status" = ?')) {
               results = mockSignals.filter((s: any) => s.status === params[0]);
             }
           } else if (lowerSql.includes('from "trades"')) {
             results = mockTrades;
-            if (lowerSql.includes('where "trades"."status" = ?')) {
+            if (lowerSql.includes('where ("trades"."signal_id" = ? and "trades"."status" = ?)')) {
+              results = mockTrades.filter((t: any) => t.signal_id === params[0] && t.status === params[1]);
+            } else if (lowerSql.includes('where "trades"."status" = ?')) {
               results = mockTrades.filter((t: any) => t.status === params[0]);
             } else if (lowerSql.includes('where ("trades"."status" = ? or "trades"."status" = ?)')) {
               results = mockTrades.filter((t: any) => t.status === params[0] || t.status === params[1]);

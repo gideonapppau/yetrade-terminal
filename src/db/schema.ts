@@ -12,18 +12,26 @@ export const telegramChannels = sqliteTable("telegram_channels", {
   channelId: text("channel_id").notNull(),
   isActive: integer("is_active").notNull().default(1),
   riskPerTrade: real("risk_per_trade"),
-  maxTradesPerDay: integer("max_trades_per_day")
+  maxTradesPerDay: integer("max_trades_per_day"),
+  /** Fast-entry channels: trade direction-only posts instantly with provisional levels. */
+  instantEntry: integer("instant_entry")
 });
 
 export const signals = sqliteTable("signals", {
   id: text("id").primaryKey(),
   channelId: text("channel_id").notNull().references(() => telegramChannels.id),
   symbol: text("symbol").notNull(),
-  direction: text("direction").notNull(), // 'BUY' | 'SELL'
+  direction: text("direction").notNull(),
   entry: real("entry"),
   stopLoss: real("stop_loss"),
-  status: text("status").notNull(), // 'RECEIVED' | 'APPROVED' | 'REJECTED' | 'EXECUTED'
+  status: text("status").notNull(), // 'RECEIVED' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'MISSED' | 'PENDING' | 'EXPIRED'
   receivedAt: integer("received_at").notNull(),
+  /**
+   * Instant-entry lifecycle:
+   *  null/0 = normal signal; 1 = executed on provisional levels, awaiting the
+   *  provider's edit; the first valid amendment clears this back to 0.
+   */
+  isProvisional: integer("is_provisional"),
 });
 
 export const trades = sqliteTable("trades", {

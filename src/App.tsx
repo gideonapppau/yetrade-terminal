@@ -10,7 +10,7 @@ import { Toaster, toast } from "sonner"
 import { Search } from "lucide-react"
 import { getDb } from "./db"
 import { trades, signals as signalsSchema } from "./db/schema"
-import { eq, or } from "drizzle-orm"
+import { eq, and, or } from "drizzle-orm"
 import { logger } from "./core/logger"
 import type { OpenPosition } from "./core/execution-engine/types"
 import { pipsToPoints } from "./lib/utils"
@@ -55,6 +55,9 @@ function App() {
   }, []);
 
   useEffect(() => {
+    // Syncs React with external systems (SQLite + broker events); the state
+    // update lands after awaits, never synchronously during render.
+    // eslint-disable-next-line react/set-state-in-effect
     loadDashboardTrades();
     window.addEventListener('mock_trade_closed', loadDashboardTrades);
     return () => window.removeEventListener('mock_trade_closed', loadDashboardTrades);
@@ -67,10 +70,45 @@ function App() {
         const mt5 = useMT5Store.getState();
         if (!mt5.isConnected || !mt5.adapter || typeof mt5.adapter.getOpenPositions !== 'function') return;
 
-        mt5.syncBalance(); // Sync live balance and equity
+        await mt5.syncBalance(); // Sync live balance and equity
 
         const db = await getDb();
         const openTradesInDb = await db.select().from(trades).where(eq(trades.status, 'OPEN'));
+
+        // Expire provisional instant-entry trades whose levels never arrived:
+        // CLOSE -> close at the broker (reconciliation records the P&L),
+        // KEEP  -> stop tracking so late edits are refused from now on.
+        // Re-filter in JS: some DB backends (mock mode) may over-return rows,
+        // and processing a stale row twice means toast spam.
+        const provisionalRows = await db
+          .select()
+          .from(signalsSchema)
+          .where(and(eq(signalsSchema.isProvisional, 1), eq(signalsSchema.status, 'EXECUTED')));
+        const provisional = provisionalRows.filter(
+          (s) => s.isProvisional === 1 && s.status === 'EXECUTED'
+        );
+        for (const sig of provisional) {
+          const windowMs = Math.max(5, useSettingsStore.getState().executionSettings.instantEditWindowSeconds) * 1000;
+          if (Date.now() - sig.receivedAt <= windowMs) continue;
+          const keep = useSettingsStore.getState().executionSettings.instantExpiryAction === 'KEEP';
+          if (!keep) {
+            const legs = openTradesInDb.filter((t) => t.signalId === sig.id);
+            for (const leg of legs) {
+              if (typeof mt5.adapter.closeTrade === 'function') {
+                await mt5.adapter.closeTrade(leg.id).catch(() => undefined);
+              }
+            }
+          }
+          await db.update(signalsSchema).set({ isProvisional: 0 }).where(eq(signalsSchema.id, sig.id));
+          logger.info({ signalId: sig.id, action: keep ? 'KEEP' : 'CLOSE' }, 'Provisional instant entry expired');
+          toast[keep ? 'warning' : 'info'](`Instant entry ${sig.symbol} expired`, {
+            id: `instant-expired-${sig.id}`,
+            description: keep
+              ? 'No levels arrived - your provisional stop/target stays in charge.'
+              : 'No levels arrived in time - the position was closed automatically.',
+          });
+        }
+
         if (openTradesInDb.length === 0) return;
 
         const openPositions: OpenPosition[] = await mt5.adapter.getOpenPositions();
@@ -210,14 +248,18 @@ function App() {
       .map((t) => ({ time: signalTimes.get(t.signalId as string) ?? null, pnl: t.pnl as number }))
       .filter((p): p is { time: number; pnl: number } => p.time != null)
       .sort((a, b) => a.time - b.time);
-    let cum = 0;
-    return points.map((p) => {
-      cum += p.pnl;
-      return {
-        time: new Date(p.time).toISOString(),
-        equity: accountBalance > 0 ? Number(((cum / accountBalance) * 100).toFixed(2)) : 0,
-      };
-    });
+    const withCum = points.reduce<{ time: string; equity: number; cum: number }[]>((acc, p) => {
+      const cum = (acc.length > 0 ? acc[acc.length - 1].cum : 0) + p.pnl;
+      return [
+        ...acc,
+        {
+          time: new Date(p.time).toISOString(),
+          equity: accountBalance > 0 ? Number(((cum / accountBalance) * 100).toFixed(2)) : 0,
+          cum,
+        },
+      ];
+    }, []);
+    return withCum.map(({ time, equity }) => ({ time, equity }));
   }, [closedTrades, signalTimes, accountBalance]);
 
   const formatTradeDate = (signalId: string | null) => {
@@ -227,6 +269,18 @@ function App() {
     return new Date(ts).toLocaleString(undefined, {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
     });
+  };
+
+  /**
+   * Neutralizes spreadsheet formula injection: cells beginning with =, +, -,
+   * or @ can execute as formulas in Excel/LibreOffice. Genuine numbers are
+   * exempt (a negative P/L is data, not a formula).
+   */
+  const sanitizeCsvCell = (v: unknown): string => {
+    const s = String(v);
+    const isNumeric = s.trim() !== '' && !Number.isNaN(Number(s));
+    if (!isNumeric && /^[=+\-@]/.test(s)) return `'${s}`;
+    return s;
   };
 
   const handleExportTrades = () => {
@@ -245,7 +299,7 @@ function App() {
         t.pnl ?? '',
         t.status === 'CLOSED_WIN' ? 'Win' : 'Loss',
       ]
-        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+        .map((v) => `"${sanitizeCsvCell(v).replace(/"/g, '""')}"`)
         .join(',')
     );
     const csv = [header, ...rows].join('\n');
@@ -263,6 +317,14 @@ function App() {
     const mt5 = useMT5Store.getState();
     if (!mt5.isConnected || !mt5.adapter) {
       toast.error("MT5 is not connected");
+      return;
+    }
+    // closeTrade is an optional adapter capability - e.g. simulated paper
+    // trades resolve on their own and have no broker position to close.
+    if (typeof mt5.adapter.closeTrade !== 'function') {
+      toast.info("Cannot close this trade", {
+        description: `${mt5.adapter.name} does not support manual closing.`,
+      });
       return;
     }
 
@@ -339,9 +401,12 @@ function App() {
     }
   }, [config, client, connectionState, setClient, setConnectionState, setProfile, logout]);
 
-  // MT5 Auto-Connect on boot
+  // MT5 Auto-Connect on boot + continuous bridge health monitoring
   useEffect(() => {
-    useMT5Store.getState().init();
+    const mt5 = useMT5Store.getState();
+    mt5.init();
+    mt5.startHealthMonitor();
+    return () => mt5.stopHealthMonitor();
   }, [])
 
   useEffect(() => {
@@ -606,7 +671,7 @@ function App() {
       <DashboardLayout activePage={activePage} onPageChange={setActivePage}>
         {renderPage()}
       </DashboardLayout>
-      <Toaster position="bottom-right" theme="dark" richColors />
+      <Toaster position="bottom-right" theme="dark" richColors visibleToasts={4} />
     </>
   )
 }

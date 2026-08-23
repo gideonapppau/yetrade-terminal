@@ -13,7 +13,12 @@ export class RiskEngine {
     signal: ParsedSignal,
     account: AccountState,
     config: RiskConfiguration,
-    symbolInfo?: { trade_tick_value: number; trade_tick_size: number; }
+    symbolInfo?: {
+      trade_tick_value: number;
+      trade_tick_size: number;
+      volume_min?: number;
+      volume_step?: number;
+    }
   ): RiskEvaluationResult {
     
     logger.info({ symbol: signal.symbol }, 'Starting risk evaluation');
@@ -87,18 +92,42 @@ export class RiskEngine {
     }
 
     // 5. RR Calculation and Check
-    // If we have an entry, calculate precise RR, otherwise use current market price (not available here yet, assume entry is provided for now)
     let calculatedRR: number | null = null;
-    if (signal.entry) {
+    if (!signal.entry) {
+      ruleResults.push({
+        ruleName: 'Minimum RR',
+        passed: false,
+        message: 'Cannot calculate RR without Entry price'
+      });
+      isApproved = false;
+    } else if (signal.takeProfits.length === 0) {
+      // TP-less signals have no computable RR. They are only tradeable when a
+      // trailing stop manages the exit; otherwise reject with an explicit
+      // reason instead of a misleading "RR 0.00".
+      if (config.trailingStopManagedTps) {
+        ruleResults.push({
+          ruleName: 'Minimum RR',
+          passed: true,
+          message: 'No take-profit targets - exit managed by trailing stop'
+        });
+      } else {
+        ruleResults.push({
+          ruleName: 'Minimum RR',
+          passed: false,
+          message: 'No take-profit targets and trailing stop is disabled'
+        });
+        isApproved = false;
+      }
+    } else {
       const riskPips = Math.abs(signal.entry - signal.stopLoss);
       // For RR, we use the furthest TP to calculate maximum potential RR
       const maxTp = signal.takeProfits.reduce((max, tp) => {
         const dist = Math.abs(tp.price - signal.entry!);
         return dist > max ? dist : max;
       }, 0);
-      
+
       calculatedRR = riskPips > 0 ? maxTp / riskPips : 0;
-      
+
       const rrCheck = calculatedRR >= config.minRR;
       ruleResults.push({
         ruleName: 'Minimum RR',
@@ -106,25 +135,21 @@ export class RiskEngine {
         message: rrCheck ? `RR is ${calculatedRR.toFixed(2)}` : `RR ${calculatedRR.toFixed(2)} is below minimum ${config.minRR}`
       });
       if (!rrCheck) isApproved = false;
-    } else {
-      ruleResults.push({
-        ruleName: 'Minimum RR',
-        passed: false,
-        message: 'Cannot calculate RR without Entry price'
-      });
-      isApproved = false;
     }
 
     // 6. Position Sizing
     let riskAmount = 0;
     let positionSize: number | null = null;
-    
+
     if (isApproved && signal.entry) {
       riskAmount = account.balance * (config.riskPerTradePercent / 100);
       // Simple sizing formula: Position Size = Risk Amount / (StopLoss Distance * TickValue)
       // This varies drastically by broker/instrument, using a simplified version for Phase 1
       const stopDistance = Math.abs(signal.entry - signal.stopLoss);
       if (stopDistance > 0) {
+        const volMin = symbolInfo?.volume_min && symbolInfo.volume_min > 0
+          ? symbolInfo.volume_min
+          : MIN_POSITION_SIZE_LOTS;
         if (symbolInfo && symbolInfo.trade_tick_size > 0 && symbolInfo.trade_tick_value > 0) {
           const ticksAtRisk = stopDistance / symbolInfo.trade_tick_size;
           const monetaryRiskPerLot = ticksAtRisk * symbolInfo.trade_tick_value;
@@ -134,7 +159,28 @@ export class RiskEngine {
           positionSize = riskAmount / (stopDistance * MOCK_TICK_VALUE_PER_LOT);
         }
         const scale = Math.pow(10, POSITION_SIZE_DECIMALS);
-        positionSize = Math.max(MIN_POSITION_SIZE_LOTS, Math.round(positionSize * scale) / scale);
+        positionSize = Math.round(positionSize * scale) / scale;
+
+        if (positionSize < volMin) {
+          if (config.rejectBelowMinVolume) {
+            // Strict policy: never exceed the configured risk percentage.
+            ruleResults.push({
+              ruleName: 'Position Sizing',
+              passed: false,
+              message: `Computed size ${positionSize.toFixed(2)} lots is below the broker minimum of ${volMin} lots`
+            });
+            positionSize = null;
+            isApproved = false;
+          } else {
+            // Legacy policy: round up to the broker minimum (risks more than
+            // configured on small accounts) so tiny accounts can still trade.
+            logger.warn(
+              { computed: positionSize, volMin },
+              'Computed size below broker minimum - rounding up to the minimum lot size'
+            );
+            positionSize = volMin;
+          }
+        }
       } else {
         isApproved = false;
         ruleResults.push({

@@ -4,6 +4,12 @@ export interface ExecutionRequest {
   signalId: string;
   signal: ParsedSignal;
   positionSize: number;
+  /**
+   * Zero-based index of this leg when a signal is split across multiple
+   * take-profits. Combined with signalId it forms the broker idempotency key
+   * so a retried request can never double-open a position.
+   */
+  splitIndex?: number;
 }
 
 export interface ExecutionResult {
@@ -60,6 +66,7 @@ export interface BrokerAdapter {
   getSymbolInfo?(symbol: string): Promise<SymbolInfo | null>;
   /** Closed-deal history for a position; null/[] when the broker has none yet. */
   getDeals?(positionTicket: string | number): Promise<PositionDeal[] | null>;
-  closeTrade?(ticket: string | number): Promise<{ success: boolean; message: string }>;
+  /** volume closes only part of the position (partial close). */
+  closeTrade?(ticket: string | number, volume?: number): Promise<{ success: boolean; message: string }>;
   modifyTrade?(ticket: string | number, sl?: number, tp?: number): Promise<{ success: boolean; message: string }>;
 }

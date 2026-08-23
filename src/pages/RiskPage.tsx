@@ -18,6 +18,7 @@ export function RiskPage() {
   const [maxOpenRisk, setMaxOpenRisk] = useState(riskConfig.maxOpenRiskPercent)
   const [maxSlippage, setMaxSlippage] = useState(riskConfig.maxSlippagePoints)
   const [newsFilter, setNewsFilter] = useState(riskConfig.newsFilterEnabled)
+  const [rejectBelowMinVolume, setRejectBelowMinVolume] = useState(riskConfig.rejectBelowMinVolume === true)
   
   const mt5 = useMT5Store()
 
@@ -77,7 +78,8 @@ export function RiskPage() {
     maxDailyLossPercent: sanitizeGlobalParam(maxDailyLoss),
     maxOpenRiskPercent: sanitizeGlobalParam(maxOpenRisk),
     maxSlippagePoints: sanitizeGlobalParam(maxSlippage, { round: true }),
-    newsFilterEnabled: newsFilter
+    newsFilterEnabled: newsFilter,
+    rejectBelowMinVolume: rejectBelowMinVolume
   });
 
   const commitChannelOverride = (
@@ -220,6 +222,16 @@ export function RiskPage() {
                     </div>
                   </label>
                   <p className="text-xs text-secondary mb-2">Block trading 30m before and after High Impact (Red) news.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1 flex justify-between items-center">
+                    Strict Minimum Lot Size
+                    <div onClick={() => setRejectBelowMinVolume(!rejectBelowMinVolume)} className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${rejectBelowMinVolume ? 'bg-accent' : 'bg-elevated border border-border'}`}>
+                      <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${rejectBelowMinVolume ? 'right-0.5' : 'left-0.5'}`}></span>
+                    </div>
+                  </label>
+                  <p className="text-xs text-secondary mb-2">Skip trades whose computed size is below the broker minimum instead of oversizing them.</p>
                 </div>
                 
                 <div className="p-4 bg-warning/10 border border-warning/20 rounded-lg">

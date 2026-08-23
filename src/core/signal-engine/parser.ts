@@ -12,13 +12,58 @@ import { logger } from '../logger';
  */
 export class RegexParser implements SignalParser {
   version(): string {
-    return '1.2.0';
+    return '1.3.0';
   }
 
   canParse(message: string): boolean {
     const upperMsg = message.toUpperCase();
-    return (upperMsg.includes('BUY') || upperMsg.includes('SELL')) && 
+    return (upperMsg.includes('BUY') || upperMsg.includes('SELL')) &&
            (upperMsg.includes('SL') || upperMsg.includes('S/L') || upperMsg.includes('STOP') || upperMsg.includes('TP') || upperMsg.includes('T/P') || upperMsg.includes('TARGET'));
+  }
+
+  /**
+   * Detects a trade *intent* - symbol plus direction but no levels yet.
+   * Used by fast-entry channels ("SELL GOLD") that post coordinates later,
+   * either as an edit or a follow-up message. Returns null unless the text
+   * strictly looks like an order command; chat noise must not trigger it.
+   */
+  parseIntent(message: string): { symbol: string; direction: TradeDirection } | null {
+    const trimmedMsg = message.trim();
+    if (!trimmedMsg) return null;
+
+    // Command-shape guards: intents are short imperative posts. Questions,
+    // exclamations and long sentences are conversation, not orders.
+    if (/[?!]/.test(trimmedMsg)) return null;
+    if (trimmedMsg.split(/\s+/).length > 8) return null;
+
+    const upperMsg = trimmedMsg.toUpperCase();
+
+    // A message carrying real levels is a complete signal, not an intent -
+    // the normal pipeline handles it.
+    if (/(?:STOP(?:[\s_]*LOSS)?|SL|S\/L)[\s:-]*[\d.]/.test(upperMsg)) return null;
+
+    // Format: PAIR: XAUUSD \n ORDER TYPE: BUY
+    const pairMatch = upperMsg.match(/(?:PAIR|SYMBOL):\s*([A-Z0-9]+)[\s\S]*?(?:ORDER TYPE|DIRECTION|ACTION):\s*(BUY|SELL)/);
+    if (pairMatch) {
+      return { symbol: pairMatch[1], direction: pairMatch[2] as TradeDirection };
+    }
+
+    // Direction-first: "SELL GOLD", "BUY BTCUSD", optionally with a price.
+    // The keyword must START a line - "we should buy gold here" is chatter,
+    // not an order. Target labels are excluded so "BUY TARGET..." never
+    // parses TARGET as a symbol.
+    const dirFirst = upperMsg.match(/(?:^|\n)\s*(BUY|SELL)\s+(?!TARGET\b|TGT\b|T\/P\b|TP\b)([A-Z0-9]{2,10})\b/);
+    if (dirFirst) {
+      return { symbol: dirFirst[2], direction: dirFirst[1] as TradeDirection };
+    }
+
+    // Symbol-first, also anchored to a line start: "XAUUSD SELL"
+    const symFirst = upperMsg.match(/(?:^|\n)\s*([A-Z0-9]{2,10})\s+(BUY|SELL)\b/);
+    if (symFirst) {
+      return { symbol: symFirst[1], direction: symFirst[2] as TradeDirection };
+    }
+
+    return null;
   }
 
   parse(message: string): ParsedSignal | null {
@@ -71,10 +116,13 @@ export class RegexParser implements SignalParser {
 
       // 4. Extract Take Profits
       const takeProfits: TakeProfit[] = [];
-      // A numbered label ("TP1:", "TARGET 2:") is only consumed when directly
-      // followed by a : or - separator; otherwise "TP 3400" would grab the
-      // label digits as part of the price.
-      const tpRegex = /(?:TAKE(?:[\s_]*PROFIT)?|TP|T\/P|TARGET|TGT)(?:\s*\d{1,2}\s*[:\-]\s*|\s*[:\-]?\s*)([\d.]+)/g;
+      // After the label, exactly one separator alternative must match:
+      //   - a numbered label ("TP1:") optionally followed by : or -
+      //   - a numbered label glued to the price ("TP1 3360")
+      //   - a bare colon/minus ("TP:3360") or whitespace ("TP 3360")
+      // Without the explicit digit-consumption branch, "TP1 3360" would parse
+      // the label digit itself as the take-profit price.
+      const tpRegex = /(?:TAKE(?:[\s_]*PROFIT)?|TP|T\/P|TARGET|TGT)(?:\s*\d{1,2}\s*[:-]\s*|\s*\d{1,2}\s+|[:-]\s*|\s+)([\d.]+)/g;
       let tpMatch;
       while ((tpMatch = tpRegex.exec(upperMsg)) !== null) {
         // Prevent matching entry or SL accidentally if formatting is weird

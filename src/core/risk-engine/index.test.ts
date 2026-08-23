@@ -175,3 +175,81 @@ describe('RiskEngine.evaluate - rejections', () => {
     expect(result.positionSize).toBeNull();
   });
 });
+
+describe('RiskEngine.evaluate - TP-less signals', () => {
+  const noTpSignal: ParsedSignal = { ...signal, takeProfits: [] };
+
+  it('rejects with an explicit reason when trailing stop is disabled', () => {
+    const result = engine.evaluate(noTpSignal, account, config, symbolInfo);
+
+    expect(result.decision).toBe('REJECTED');
+    expect(result.ruleResults.find((r) => r.ruleName === 'Minimum RR')?.passed).toBe(false);
+    expect(result.ruleResults.find((r) => r.ruleName === 'Minimum RR')?.message).toContain(
+      'No take-profit targets'
+    );
+  });
+
+  it('allows TP-less signals when a trailing stop manages the exit', () => {
+    const result = engine.evaluate(
+      noTpSignal,
+      account,
+      { ...config, trailingStopManagedTps: true },
+      symbolInfo
+    );
+
+    expect(result.decision).toBe('APPROVED');
+    expect(result.positionSize).not.toBeNull();
+  });
+
+  it('still rejects entryless signals even when trailing stop is armed', () => {
+    const result = engine.evaluate(
+      { ...noTpSignal, entry: undefined },
+      account,
+      { ...config, trailingStopManagedTps: true },
+      symbolInfo
+    );
+
+    expect(result.decision).toBe('REJECTED');
+  });
+});
+
+describe('RiskEngine.evaluate - minimum volume policy', () => {
+  // $100 risk / ($500 risk per lot) = 0.2 lots - comfortably above any minimum
+  const minVolInfo = { ...symbolInfo, volume_min: 0.01 };
+
+  it('rounds sub-minimum sizes up to the broker minimum by default', () => {
+    const tinyAccount: AccountState = { ...account, balance: 10 };
+    const result = engine.evaluate(signal, tinyAccount, config, minVolInfo);
+
+    expect(result.decision).toBe('APPROVED');
+    expect(result.positionSize).toBe(0.01);
+  });
+
+  it('rejects sub-minimum sizes when the strict policy is enabled', () => {
+    const tinyAccount: AccountState = { ...account, balance: 10 };
+    const result = engine.evaluate(
+      signal,
+      tinyAccount,
+      { ...config, rejectBelowMinVolume: true },
+      minVolInfo
+    );
+
+    expect(result.decision).toBe('REJECTED');
+    expect(result.positionSize).toBeNull();
+    expect(result.ruleResults.find((r) => r.ruleName === 'Position Sizing')?.message).toContain(
+      'below the broker minimum'
+    );
+  });
+
+  it('approves sizes above the broker minimum under the strict policy', () => {
+    const result = engine.evaluate(
+      signal,
+      account,
+      { ...config, rejectBelowMinVolume: true },
+      minVolInfo
+    );
+
+    expect(result.decision).toBe('APPROVED');
+    expect(result.positionSize).toBeCloseTo(0.2, 6);
+  });
+});

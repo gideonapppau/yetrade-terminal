@@ -19,6 +19,36 @@ describe('RegexParser.canParse', () => {
   });
 });
 
+describe('RegexParser.parseIntent', () => {
+  it('detects direction-first intents without levels', () => {
+    expect(parser.parseIntent('SELL GOLD')).toEqual({ symbol: 'GOLD', direction: 'SELL' });
+    expect(parser.parseIntent('Buy XAUUSD now')).toEqual({ symbol: 'XAUUSD', direction: 'BUY' });
+  });
+
+  it('detects symbol-first and structured intents', () => {
+    expect(parser.parseIntent('XAUUSD SELL')).toEqual({ symbol: 'XAUUSD', direction: 'SELL' });
+    expect(parser.parseIntent('PAIR: EURUSD\nORDER TYPE: BUY')).toEqual({ symbol: 'EURUSD', direction: 'BUY' });
+  });
+
+  it('rejects complete signals - they belong to the normal pipeline', () => {
+    expect(parser.parseIntent('XAUUSD BUY\nENTRY: 3350\nSL: 3340\nTP: 3400')).toBeNull();
+  });
+
+  it('never mistakes target labels for symbols', () => {
+    expect(parser.parseIntent('BUY TARGET 70000')).toBeNull();
+  });
+
+  it('rejects mid-sentence direction words - chatter is not an order', () => {
+    expect(parser.parseIntent('we should buy gold here')).toBeNull();
+    expect(parser.parseIntent('looking to sell eurusd later')).toBeNull();
+  });
+
+  it('returns null for chat noise', () => {
+    expect(parser.parseIntent('what did you buy today?')).toBeNull();
+    expect(parser.parseIntent('')).toBeNull();
+  });
+});
+
 describe('RegexParser.parse', () => {
   it('parses the standard multi-line format with multiple TPs', () => {
     const signal = parser.parse(
@@ -76,6 +106,12 @@ describe('RegexParser.parse', () => {
 
     const spaced = parser.parse('EURUSD SELL\nENTRY: 1.085\nSL: 1.09\nTARGET 2: 1.075');
     expect(spaced!.takeProfits.map((tp) => tp.price)).toEqual([1.075]);
+  });
+
+  it('parses numbered TP labels separated by whitespace instead of a colon', () => {
+    // Regression: "TP1 3360" used to parse the label digit as the price ([1, 2])
+    const signal = parser.parse('XAUUSD BUY\nENTRY: 3350\nSL: 3340\nTP1 3360\nTP2 3380');
+    expect(signal!.takeProfits.map((tp) => tp.price)).toEqual([3360, 3380]);
   });
 
   it('parses unnumbered TP labels with a bare space separator', () => {

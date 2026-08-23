@@ -19,6 +19,7 @@ export function SignalsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All")
   const [searchQuery, setSearchQuery] = useState("")
   const [executingIds, setExecutingIds] = useState<string[]>([])
+  const [simulating, setSimulating] = useState(false)
   const signals = useSignalStore(state => state.signals);
   const { isConnected: mt5Connected, balance: mt5Balance, currency: mt5Currency } = useMT5Store();
   const riskPerTrade = useSettingsStore(state => state.riskConfig.riskPerTradePercent);
@@ -138,46 +139,54 @@ export function SignalsPage() {
             <input type="text" placeholder="Search signals..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 pr-4 py-1.5 h-full bg-elevated border border-border rounded-lg text-sm focus:outline-none focus:border-accent transition-colors w-64" />
           </div>
           
-          <button 
+          <button
             onClick={async () => {
-              const service = useTelegramStore.getState().service;
-              const mt5 = useMT5Store.getState();
-              
-              if (!service) {
-                toast.error("Telegram service not connected.");
-                return;
-              }
-              
-              if (!mt5.isConnected || !mt5.adapter.getSymbolPrice) {
-                toast.error("MT5 not connected. Please connect broker to simulate live trades.");
-                return;
-              }
-              
-              const toastId = toast.loading("Fetching live market price...");
-              const symbol = "BTCUSDm";
-              const price = await mt5.adapter.getSymbolPrice(symbol);
-              toast.dismiss(toastId);
-              
-              if (!price) {
-                toast.error(`Failed to fetch live price for ${symbol}.`);
-                return;
-              }
-              
-              const entry = price.ask;
-              const sl = entry - 1000;
-              const tp = entry + 2000; // Ensures an RR of 2.0 to pass Risk Engine checks
+              if (simulating) return;
+              setSimulating(true);
+              try {
+                const service = useTelegramStore.getState().service;
+                const mt5 = useMT5Store.getState();
 
-              service.handleNewMessage({
-                messageId: Date.now().toString(),
-                channelId: "12345",
-                text: `${symbol} BUY\nENTRY: ${entry.toFixed(2)}\nSL: ${sl.toFixed(2)}\nTP: ${tp.toFixed(2)}`,
-                timestamp: new Date(),
-                edited: false
-              });
+                if (!service) {
+                  toast.error("Telegram service not connected.", { id: 'simulate' });
+                  return;
+                }
+
+                if (!mt5.isConnected || !mt5.adapter.getSymbolPrice) {
+                  toast.error("MT5 not connected. Please connect broker to simulate live trades.", { id: 'simulate' });
+                  return;
+                }
+
+                const toastId = "simulate-price";
+                toast.loading("Fetching live market price...", { id: toastId });
+                const symbol = "BTCUSDm";
+                const price = await mt5.adapter.getSymbolPrice(symbol);
+                toast.dismiss(toastId);
+
+                if (!price) {
+                  toast.error(`Failed to fetch live price for ${symbol}.`, { id: 'simulate' });
+                  return;
+                }
+
+                const entry = price.ask;
+                const sl = entry - 1000;
+                const tp = entry + 2000; // Ensures an RR of 2.0 to pass Risk Engine checks
+
+                await service.handleNewMessage({
+                  messageId: Date.now().toString(),
+                  channelId: "12345",
+                  text: `${symbol} BUY\nENTRY: ${entry.toFixed(2)}\nSL: ${sl.toFixed(2)}\nTP: ${tp.toFixed(2)}`,
+                  timestamp: new Date(),
+                  edited: false
+                });
+              } finally {
+                setSimulating(false);
+              }
             }}
-            className="px-4 py-1.5 bg-accent/10 text-accent border border-accent/20 rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-all flex items-center gap-2"
+            disabled={simulating}
+            className="px-4 py-1.5 bg-accent/10 text-accent border border-accent/20 rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-all flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
           >
-            <Activity size={14} /> Simulate BTC
+            <Activity size={14} /> {simulating ? "Simulating..." : "Simulate BTC"}
           </button>
         </div>
       </div>

@@ -22,8 +22,12 @@ export function EquityChartCard({ data = [] }: EquityChartCardProps) {
 
   const visibleData = useMemo(() => {
     const range = CHART_RANGES.find((r) => r.id === rangeId);
-    if (!range || range.days === null) return data;
-    const cutoff = Date.now() - range.days * MS_PER_DAY;
+    if (!range || range.days === null || data.length === 0) return data;
+    // Anchor the window to the newest data point instead of the wall clock:
+    // keeps the filter pure (render-safe) and meaningful for old histories.
+    const newest = Math.max(...data.map((d) => Date.parse(d.time)));
+    if (!Number.isFinite(newest)) return data;
+    const cutoff = newest - range.days * MS_PER_DAY;
     return data.filter((d) => Date.parse(d.time) >= cutoff);
   }, [data, rangeId]);
 

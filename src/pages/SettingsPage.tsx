@@ -310,6 +310,17 @@ export function SettingsPage() {
     }
   }
 
+  /** Instant Entry: direction-only posts trade immediately with provisional levels. */
+  const handleToggleInstantEntry = async (id: string, currentValue: unknown) => {
+    try {
+      const db = await getDb()
+      await db.update(telegramChannels).set({ instantEntry: currentValue === 1 ? 0 : 1 }).where(eq(telegramChannels.id, id))
+      await loadChannels()
+    } catch (e) {
+      logger.error({ err: e }, "Failed to toggle instant entry")
+    }
+  }
+
   const handleDeleteChannel = async (id: string) => {
     try {
       const db = await getDb()
@@ -330,16 +341,6 @@ export function SettingsPage() {
           <p className="text-secondary text-sm">Configure connections, API keys, and application preferences.</p>
         </div>
         <div className="flex items-center gap-4">
-          <button 
-            onClick={async () => {
-              const db = await getDb();
-              const all = await db.select().from(telegramChannels);
-              alert("Channels in DB: " + JSON.stringify(all));
-            }}
-            className="bg-secondary text-white px-4 py-2 rounded-lg font-medium text-sm"
-          >
-            Debug DB
-          </button>
           {saveMessage && <span className="text-success text-sm font-medium">{saveMessage}</span>}
           <button onClick={handleSaveConfig} className="bg-primary text-primary-foreground px-6 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-primary/90 transition-colors">
             <Save size={16} /> Save Config
@@ -623,6 +624,39 @@ export function SettingsPage() {
                         <span className="text-sm font-medium">Auto-start Python Bridge on Launch</span>
                       </label>
                     </div>
+
+                    <div className="pt-4 border-t border-border">
+                      <h4 className="text-sm font-bold mb-1">Instant Entry Defaults</h4>
+                      <p className="text-xs text-secondary mb-4">Used for channels with the "Instant" toggle: direction-only posts trade immediately at these levels, then adopt the real ones when the source edits them.</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Provisional Stop (pips)</label>
+                          <input type="number" min="1" step="1" value={executionSettings.instantEntryStopPips} onChange={(e) => setExecutionSettings({ instantEntryStopPips: Math.max(1, Math.round(Number(e.target.value) || 1)) })} className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                          <p className="text-xs text-secondary mt-1">Blind stop distance - also drives position size. Tune per market.</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Provisional Target</label>
+                          <select value={executionSettings.instantTargetRR} onChange={(e) => setExecutionSettings({ instantTargetRR: Number(e.target.value) })} className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors appearance-none">
+                            <option value={2}>2 x risk</option>
+                            <option value={3}>3 x risk</option>
+                          </select>
+                          <p className="text-xs text-secondary mt-1">Take-profit distance as a multiple of the stop.</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Edit Window (seconds)</label>
+                          <input type="number" min="5" step="5" value={executionSettings.instantEditWindowSeconds} onChange={(e) => setExecutionSettings({ instantEditWindowSeconds: Math.max(5, Math.round(Number(e.target.value) || 60)) })} className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                          <p className="text-xs text-secondary mt-1">How long an edit may complete or adjust a signal.</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">If No Levels Arrive</label>
+                          <select value={executionSettings.instantExpiryAction} onChange={(e) => setExecutionSettings({ instantExpiryAction: e.target.value === 'KEEP' ? 'KEEP' : 'CLOSE' })} className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors appearance-none">
+                            <option value="CLOSE">Close the trade</option>
+                            <option value="KEEP">Keep it open</option>
+                          </select>
+                          <p className="text-xs text-secondary mt-1">Applied when the window expires without an edit.</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -805,6 +839,7 @@ export function SettingsPage() {
                     ) : (
                       visibleChannels.map((channel: any) => {
                         const isActive = (channel.isActive !== undefined ? channel.isActive : channel.is_active) === 1;
+                        const instantOn = ((channel.instantEntry ?? channel.instant_entry) === 1);
                         const channelId = channel.channelId || channel.channel_id || "";
                         const name = channel.name || "?";
                         
@@ -841,6 +876,16 @@ export function SettingsPage() {
                             </div>
 
                             <div className="flex items-center gap-4 shrink-0 z-10 transition-all">
+                              <label className="relative inline-flex items-center cursor-pointer scale-90" title={instantOn ? "Instant Entry: ON - direction-only posts trade immediately" : "Instant Entry: OFF"}>
+                                <input
+                                  type="checkbox"
+                                  checked={instantOn}
+                                  onChange={() => handleToggleInstantEntry(channel.id, instantOn ? 1 : 0)}
+                                  className="sr-only peer"
+                                />
+                                <div className={`w-10 h-5.5 rounded-full border peer-focus:outline-none relative transition-colors ${instantOn ? 'bg-accent border-accent' : 'bg-elevated border-border/50'} after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:after:bg-white peer-checked:after:translate-x-full`}></div>
+                                <span className={`ml-2 text-[10px] font-bold uppercase tracking-wider ${instantOn ? 'text-accent' : 'text-secondary'}`}>Instant</span>
+                              </label>
                               <label className="relative inline-flex items-center cursor-pointer scale-90" title={isActive ? "Pause Monitoring" : "Resume Monitoring"}>
                                 <input type="checkbox" checked={isActive} onChange={() => handleToggleChannel(channel.id, channel.isActive)} className="sr-only peer" />
                                 <div className="w-10 h-5.5 bg-elevated border border-border/50 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-border after:border after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:bg-success peer-checked:border-success peer-checked:after:bg-white shadow-inner"></div>
