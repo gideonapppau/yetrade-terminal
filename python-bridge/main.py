@@ -3,6 +3,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
 import atexit
+import time
 
 app = Flask(__name__)
 CORS(app)  # Allow requests from Tauri
@@ -212,8 +213,26 @@ def get_symbol_info():
         "point": info.point
     })
 
+def _get_fresh_tick(symbol, retries=4, delay=0.25):
+    """Best-effort live tick. Freshly selected symbols often report no tick
+    until the first quote streams in."""
+    tick = mt5.symbol_info_tick(symbol)
+    attempts = 0
+    while attempts < retries and (tick is None or (tick.ask <= 0 and tick.bid <= 0)):
+        time.sleep(delay)
+        tick = mt5.symbol_info_tick(symbol)
+        attempts += 1
+    return tick
+
+
 @app.route("/trade/execute", methods=["POST"])
 def execute_trade():
+    """Market execution anchored to the CURRENT broker price.
+
+    Signal levels are what the provider posted and are often stale by
+    execution time: we fill at the live market price, shift sl/tp by the same
+    drift so distances (and therefore risk/reward) are preserved, and clamp
+    them to the broker's minimum stop distance so orders aren't rejected."""
     trade = request.json
     if not trade:
         return jsonify({"detail": "Invalid request body"}), 400
@@ -223,8 +242,12 @@ def execute_trade():
     volume = float(trade.get("volume", 0.01))
     sl = trade.get("sl")
     tp = trade.get("tp")
+    entry = trade.get("entry")  # provider's posted entry price, may be stale
     magic = int(trade.get("magic", 234000))
     deviation = int(trade.get("deviation", 20))
+
+    if not symbol or not action:
+        return jsonify({"success": False, "message": "Missing symbol or action"}), 400
 
     if not mt5.symbol_select(symbol, True):
         return jsonify({"success": False, "message": f"Symbol {symbol} not found"}), 400
@@ -232,35 +255,114 @@ def execute_trade():
     symbol_info = mt5.symbol_info(symbol)
     if symbol_info is None:
         return jsonify({"success": False, "message": f"Failed to get info for {symbol}"}), 400
-    
-    order_type = mt5.ORDER_TYPE_BUY if action.upper() == "BUY" else mt5.ORDER_TYPE_SELL
-    price = mt5.symbol_info_tick(symbol).ask if order_type == mt5.ORDER_TYPE_BUY else mt5.symbol_info_tick(symbol).bid
 
-    req = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": volume,
-        "type": order_type,
-        "price": price,
-        "deviation": deviation,
-        "magic": magic,
-        "comment": "ACE Terminal",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
+    is_buy = action.upper() == "BUY"
+    order_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
+
+    tick = _get_fresh_tick(symbol)
+    if tick is None:
+        msg = f"No live price available for {symbol} (market closed or feed idle)"
+        logger.error(msg)
+        return jsonify({"success": False, "message": msg}), 503
+
+    ask = tick.ask or tick.bid
+    bid = tick.bid or tick.ask
+    ref = ask if is_buy else bid
+
+    point = symbol_info.point or 0.0
+    digits = int(getattr(symbol_info, "digits", 5) or 5)
+
+    # Slippage tolerance must scale with the instrument: a fixed point count
+    # that suits FX is mere cents on crypto and gets rejected as requotes.
+    if point > 0:
+        deviation = max(deviation, int((ref * 0.001) / point))
+
+    # --- Re-anchor stops around the live market ---------------------------
+    stops_points = getattr(symbol_info, "trade_stops_level", 0) or 0
+    min_dist = (stops_points + 2) * point
+
+    shift = 0.0
+    try:
+        entry_val = float(entry) if entry else 0.0
+    except (TypeError, ValueError):
+        entry_val = 0.0
+    if entry_val > 0:
+        shift = entry_val - ref
+        logger.info(f"Re-anchoring {symbol}: posted entry {entry_val} vs live {ref} (shift {-shift:.5f})")
+
+    adj_sl = float(sl) - shift if sl else None
+    adj_tp = float(tp) - shift if tp else None
+
+    if adj_sl is not None:
+        # BUY SL must sit below the bid; SELL SL above the ask
+        adj_sl = min(adj_sl, bid - min_dist) if is_buy else max(adj_sl, ask + min_dist)
+    if adj_tp is not None:
+        # BUY TP must sit above the ask; SELL TP below the bid
+        adj_tp = max(adj_tp, ask + min_dist) if is_buy else min(adj_tp, bid - min_dist)
+
+    # Respect the broker's supported filling policies instead of hardcoding IOC
+    supported = int(getattr(symbol_info, "filling_mode", 0) or 0)
+    fillings = []
+    if supported & 2:
+        fillings.append(mt5.ORDER_FILLING_IOC)
+    if supported & 1:
+        fillings.append(mt5.ORDER_FILLING_FOK)
+    fillings.append(mt5.ORDER_FILLING_RETURN)
+
+    retryable_retcode = {
+        getattr(mt5, "TRADE_RETCODE_INVALID_FILL", 10030),
+        getattr(mt5, "TRADE_RETCODE_REQUOTE", 10004),
+        getattr(mt5, "TRADE_RETCODE_PRICE_OFF", 10021),
+        getattr(mt5, "TRADE_RETCODE_TIMEOUT", 10012),
     }
 
-    if sl:
-        req["sl"] = float(sl)
-    if tp:
-        req["tp"] = float(tp)
+    last_msg = "Order failed"
+    for mode in fillings:
+        fresh = _get_fresh_tick(symbol, retries=2, delay=0.2)
+        if fresh is None:
+            break
+        f_ask = fresh.ask or fresh.bid
+        f_bid = fresh.bid or fresh.ask
+        exec_price = f_ask if is_buy else f_bid
 
-    result = mt5.order_send(req)
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
-        logger.error(f"Order failed, retcode={result.retcode}")
-        return jsonify({"success": False, "message": f"Order failed, retcode={result.retcode}"})
+        req = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": volume,
+            "type": order_type,
+            "price": round(exec_price, digits),
+            "deviation": deviation,
+            "magic": magic,
+            "comment": "ACE Terminal",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mode,
+        }
+        if adj_sl is not None:
+            req["sl"] = round(adj_sl, digits)
+        if adj_tp is not None:
+            req["tp"] = round(adj_tp, digits)
 
-    logger.info(f"Order placed successfully. Ticket: {result.order}")
-    return jsonify({"success": True, "ticket": result.order, "message": "Order executed successfully"})
+        result = mt5.order_send(req)
+        if result is None:
+            last_msg = f"order_send returned None: {mt5.last_error()}"
+            logger.error(last_msg)
+            continue
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            filled = float(result.price) if result.price else exec_price
+            logger.info(f"Order placed successfully. Ticket: {result.order} @ {filled}")
+            return jsonify({
+                "success": True,
+                "ticket": result.order,
+                "price": filled,
+                "volume": float(result.volume or volume),
+                "message": "Order executed successfully"
+            })
+        last_msg = f"retcode={result.retcode} ({getattr(result, 'comment', '')})"
+        logger.error(f"Order attempt failed with filling={mode}: {last_msg}")
+        if result.retcode not in retryable_retcode:
+            break
+
+    return jsonify({"success": False, "message": f"Order failed: {last_msg}"})
 
 @app.route("/trade/close", methods=["POST"])
 def close_trade():

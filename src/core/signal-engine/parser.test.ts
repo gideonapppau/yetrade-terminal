@@ -84,4 +84,24 @@ describe('RegexParser.parse', () => {
     expect(signal!.entry).toBe(69000);
     expect(signal!.takeProfits.map((tp) => tp.price)).toEqual([70000]);
   });
+
+  it('parses the emoji-heavy PAIR/ORDER TYPE format with an entry range', () => {
+    const signal = parser.parse(
+      '‼️SIGNAL ALERT‼️\n' +
+      'PAIR: BTCUSD\n' +
+      'ORDER TYPE: BUY\n' +
+      'ENTRY PRICE: 77000 - 76000\n\n' +
+      '❌STOP LOSS: 75000\n\n' +
+      '✅TAKE PROFIT 1:80000\n' +
+      '✅TAKE PROFIT 2:83000\n\n' +
+      '‼️Follow Risk Management rules‼️'
+    );
+
+    expect(signal).not.toBeNull();
+    expect(signal!.symbol).toBe('BTCUSD');
+    expect(signal!.direction).toBe('BUY');
+    expect(signal!.entry).toBe(77000);
+    expect(signal!.stopLoss).toBe(75000);
+    expect(signal!.takeProfits.map((tp) => tp.price)).toEqual([80000, 83000]);
+  });
 });

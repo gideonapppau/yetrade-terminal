@@ -4,7 +4,7 @@ import { signals, telegramChannels, telegramMessages, trades } from '../../db/sc
 import { RegexParser } from '../signal-engine/parser';
 import { logger } from '../logger';
 import type { RawTelegramMessage } from './types';
-import { eq, and, gte } from 'drizzle-orm';
+import { eq, and, gte, or } from 'drizzle-orm';
 import { useSignalStore, type UiSignal } from '../../store/signals';
 import { useSettingsStore } from '../../store/settings';
 import { useMT5Store } from '../../store/mt5';
@@ -182,10 +182,6 @@ export class TelegramService {
           const openTrades = await db.select().from(trades).where(eq(trades.status, 'OPEN'));
           const startOfDay = new Date();
           startOfDay.setHours(0, 0, 0, 0);
-          const todaySignals = await db
-            .select()
-            .from(signals)
-            .where(and(eq(signals.status, 'EXECUTED'), gte(signals.receivedAt, startOfDay.getTime())));
 
           // Executed signals from THIS channel today (for per-channel daily caps)
           const channelTodaySignals = await db
@@ -199,12 +195,24 @@ export class TelegramService {
               )
             );
 
-          // Daily loss approximation: signals executed today count against the daily loss budget
-          const dailyLossPercent = todaySignals.length * safeGlobalRisk.riskPerTradePercent;
-
           // Prefer live broker balance when available; fall back to configured balance
           const effectiveBalance =
             mt5.isConnected && mt5.balance > 0 ? mt5.balance : settings.accountBalance;
+
+          // Daily loss budget consumption = NET realized P&L of trades closed
+          // today (winners offset losers), as % of the balance. Counting every
+          // executed signal as a full risk-unit loss would burn the whole day's
+          // budget after a few attempts regardless of actual results.
+          const closedTradesToday = await db
+            .select()
+            .from(trades)
+            .where(or(eq(trades.status, 'CLOSED_WIN'), eq(trades.status, 'CLOSED_LOSS')));
+          const realizedNetToday = closedTradesToday.reduce((sum, t) => {
+            if (t.closedAt == null || t.closedAt < startOfDay.getTime()) return sum;
+            return sum + (t.pnl ?? 0);
+          }, 0);
+          const dailyLossPercent =
+            effectiveBalance > 0 ? Math.max(0, -realizedNetToday / effectiveBalance) * 100 : 0;
 
           const account = {
             balance: effectiveBalance,

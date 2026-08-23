@@ -127,6 +127,9 @@ export class MT5Adapter implements BrokerAdapter {
           volume: volume,
           sl: request.signal.stopLoss,
           tp: request.signal.takeProfits?.[0]?.price, // Use TP1
+          // Provider's posted entry lets the bridge re-anchor SL/TP to the
+          // live market price at execution time (prevents invalid-stop rejections)
+          entry: request.signal.entry ?? null,
           deviation: maxSlippagePoints,
         }),
       });
@@ -136,7 +139,12 @@ export class MT5Adapter implements BrokerAdapter {
         return { success: false, message: data.message || 'Execution failed', executedAt: new Date() };
       }
 
-      return { success: true, tradeId: data.ticket?.toString(), executedAt: new Date() };
+      return {
+        success: true,
+        tradeId: data.ticket?.toString(),
+        entryPrice: typeof data.price === 'number' ? data.price : undefined,
+        executedAt: new Date()
+      };
     } catch (e: any) {
       logger.error({ err: e }, 'MT5 trade execution failed');
       return { success: false, message: e.message, executedAt: new Date() };
