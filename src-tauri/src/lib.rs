@@ -80,6 +80,23 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            use tauri_plugin_shell::ShellExt;
+            
+            // Spawn the Python server sidecar
+            let sidecar_command = app.shell().sidecar("python-server")
+                .expect("failed to create `python-server` binary command");
+            let (mut rx, _child) = sidecar_command
+                .spawn()
+                .expect("Failed to spawn sidecar");
+            
+            tauri::async_runtime::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    if let tauri_plugin_shell::process::CommandEvent::Stdout(line) = event {
+                        println!("python-server: {}", String::from_utf8_lossy(&line));
+                    }
+                }
+            });
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

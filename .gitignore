@@ -21,6 +21,9 @@ __pycache__/
 venv/
 env/
 python-bridge/venv/
+python-bridge/build/
+python-bridge/dist/
+python-bridge/*.spec
 .pytest_cache/
 
 # Databases
@@ -40,6 +43,7 @@ src-tauri/trading-terminal.db
 
 # Tauri / Rust
 src-tauri/target/
+src-tauri/bin/
 
 # Editor directories and files
 .vscode/*

@@ -26,7 +26,11 @@ export function DashboardLayout({ children, activePage, onPageChange, onOpenComm
   const mt5Connected = useMT5Store((s) => s.isConnected);
   const tradingPaused = useSettingsStore((s) => s.tradingPaused);
   const allSignals = useSignalStore((s) => s.signals);
-  const [isDark, setIsDark] = useState(false)
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem('yettrade_theme')
+    if (saved) return saved === 'dark'
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  })
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const [isNotifOpen, setIsNotifOpen] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
@@ -64,8 +68,10 @@ export function DashboardLayout({ children, activePage, onPageChange, onOpenComm
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add('dark')
+      localStorage.setItem('yettrade_theme', 'dark')
     } else {
       document.documentElement.classList.remove('dark')
+      localStorage.setItem('yettrade_theme', 'light')
     }
   }, [isDark])
 

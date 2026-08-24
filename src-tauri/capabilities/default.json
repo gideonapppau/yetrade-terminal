@@ -13,8 +13,8 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "python",
-          "cmd": "python"
+          "name": "bin/python-server",
+          "sidecar": true
         }
       ]
     },

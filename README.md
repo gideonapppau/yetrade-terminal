@@ -52,16 +52,21 @@ npm install
 ```
 
 ### 2. Setup the Python Bridge
-The terminal communicates with MetaTrader 5 via a Python backend. You must install the required Python packages.
+The terminal communicates with MetaTrader 5 via a Python backend. This backend is bundled as a Tauri sidecar and automatically runs when the app starts. To set it up for development, you must build the Python executable using PyInstaller.
+
 ```bash
 cd python-bridge
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-# Alternatively, install MetaTrader5 and Flask manually:
-# pip install MetaTrader5 Flask flask-cors
+pip install pyinstaller
+pyinstaller --onefile --name python-server --hidden-import MetaTrader5 --hidden-import flask_cors main.py
+mkdir -Force ..\src-tauri\bin
+Move-Item -Force dist\python-server.exe ..\src-tauri\bin\python-server-x86_64-pc-windows-msvc.exe
 ```
 
 ### 3. Run the Application
-The application can automatically start the Python bridge if configured in the Settings. To run the full desktop application in development mode:
+The application automatically manages the Python bridge in the background. To run the full desktop application in development mode:
 ```bash
 npm run tauri dev
 ```
