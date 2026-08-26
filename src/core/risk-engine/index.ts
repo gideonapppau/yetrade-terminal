@@ -16,6 +16,7 @@ export class RiskEngine {
     symbolInfo?: {
       trade_tick_value: number;
       trade_tick_size: number;
+      trade_contract_size?: number;
       volume_min?: number;
       volume_step?: number;
     }
@@ -150,14 +151,21 @@ export class RiskEngine {
         const volMin = symbolInfo?.volume_min && symbolInfo.volume_min > 0
           ? symbolInfo.volume_min
           : MIN_POSITION_SIZE_LOTS;
+        
         if (symbolInfo && symbolInfo.trade_tick_size > 0 && symbolInfo.trade_tick_value > 0) {
           const ticksAtRisk = stopDistance / symbolInfo.trade_tick_size;
           const monetaryRiskPerLot = ticksAtRisk * symbolInfo.trade_tick_value;
           positionSize = riskAmount / monetaryRiskPerLot;
+        } else if (symbolInfo && symbolInfo.trade_contract_size && symbolInfo.trade_contract_size > 0) {
+          // Fallback for crypto brokers where trade_tick_value is 0
+          // Risk = Price Distance * Contract Size * Lot Size
+          const monetaryRiskPerLot = stopDistance * symbolInfo.trade_contract_size!;
+          positionSize = riskAmount / monetaryRiskPerLot;
         } else {
-          // Fallback if symbol info is missing (e.g. testing)
+          // Fallback if symbol info is completely missing (e.g. testing)
           positionSize = riskAmount / (stopDistance * MOCK_TICK_VALUE_PER_LOT);
         }
+        
         const scale = Math.pow(10, POSITION_SIZE_DECIMALS);
         positionSize = Math.round(positionSize * scale) / scale;
 
