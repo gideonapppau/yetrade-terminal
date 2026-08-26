@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ArrowDownRight, ArrowUpRight, Clock, Target, ShieldAlert, Activity } from "lucide-react"
+import { ArrowDownRight, ArrowUpRight, Clock, Target, ShieldAlert, Radio } from "lucide-react"
 import { useSignalStore } from "../../store/signals"
 
 function SymbolIcon({ symbol, direction }: { symbol: string, direction: 'BUY' | 'SELL' }) {
@@ -40,7 +40,7 @@ export function SignalFeed() {
     <div className="glass rounded-2xl flex flex-col h-full border border-border">
       <div className="p-6 border-b border-border flex items-center justify-between">
         <h3 className="font-medium text-lg flex items-center gap-2 text-white">
-          <Activity size={18} className="text-accent" /> Live Signal Feed
+          <Radio size={18} className="text-accent" /> Live Signal Feed
         </h3>
         <div className="flex items-center gap-2 text-xs font-medium text-success bg-success/10 px-2 py-1 rounded">
           <span className="flex h-2 w-2 rounded-full bg-success"></span>
@@ -53,7 +53,7 @@ export function SignalFeed() {
           {signals.length === 0 ? (
             <div className="text-center py-12 px-4 text-secondary text-sm">
               <div className="w-12 h-12 bg-elevated rounded-full flex items-center justify-center mx-auto mb-3 border border-border">
-                <Activity size={20} className="text-secondary/50" />
+                <Radio size={20} className="text-secondary/50" />
               </div>
               Waiting for incoming Telegram signals...
             </div>

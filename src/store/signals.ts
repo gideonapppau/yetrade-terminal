@@ -23,6 +23,7 @@ export interface UiSignal {
 interface SignalState {
   signals: UiSignal[];
   addSignal: (signal: UiSignal) => void;
+  updateSignal: (id: string, updates: Partial<UiSignal>) => void;
   clearSignals: () => void;
 }
 
@@ -39,6 +40,10 @@ export const useSignalStore = create<SignalState>()(
             ? state
             : { signals: [signal, ...state.signals].slice(0, MAX_PERSISTED_SIGNALS) }
         ),
+      updateSignal: (id, updates) => 
+        set((state) => ({
+          signals: state.signals.map((s) => s.id === id ? { ...s, ...updates } : s)
+        })),
       clearSignals: () => set({ signals: [] }),
     }),
     {

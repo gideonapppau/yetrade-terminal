@@ -526,8 +526,9 @@ function App() {
                                 {profit !== undefined ? (
                                   <motion.div
                                     key={profit}
-                                    initial={{ scale: 1.1, color: profit >= 0 ? '#10b981' : '#ef4444' }}
-                                    animate={{ scale: 1, color: profit >= 0 ? 'currentColor' : 'currentColor' }}
+                                    initial={{ scale: 1.15, y: -2 }}
+                                    animate={{ scale: 1, y: 0 }}
+                                    transition={{ type: 'spring', stiffness: 400, damping: 10 }}
                                     className={`text-sm font-bold ${profit >= 0 ? 'text-success' : 'text-destructive'}`}
                                   >
                                     {profit >= 0 ? '+' : ''}{profit.toFixed(2)}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Settings, Save, Smartphone, MonitorDot, Link2, CheckCircle2, Search, Trash2, RefreshCw, Radio, PencilLine } from "lucide-react"
+import { Settings, Save, Smartphone, MonitorDot, Link2, CheckCircle2, Search, Trash2, RefreshCw, Radio, PencilLine, Zap, Info, Play, Pause } from "lucide-react"
 import { getDb } from "../db"
 import { telegramChannels } from "../db/schema"
 import { eq } from "drizzle-orm"
@@ -846,52 +846,61 @@ export function SettingsPage() {
                         return (
                           <div 
                             key={channel.id} 
-                            className={`group relative overflow-hidden p-4 rounded-2xl flex items-center justify-between transition-all duration-300 ${
+                            className={`group relative p-4 rounded-xl flex items-center justify-between transition-all duration-200 border ${
                               isActive 
-                                ? "bg-gradient-to-br from-surface to-elevated border border-white/5 shadow-[0_8px_16px_-6px_rgba(0,0,0,0.3)] hover:shadow-[0_12px_24px_-8px_rgba(0,0,0,0.4)] hover:border-white/10" 
-                                : "bg-elevated/10 border border-transparent opacity-60 grayscale-[40%]"
+                                ? "bg-transparent border-border shadow-none hover:border-border/80" 
+                                : "bg-transparent border-transparent opacity-60 grayscale-[20%]"
                             }`}
                           >
-                            {/* Animated Background Glow for Active Channels */}
-                            {isActive && (
-                              <div className="absolute -inset-24 bg-gradient-to-r from-accent/0 via-accent/5 to-accent/0 opacity-0 group-hover:opacity-100 transition-opacity duration-1000 -rotate-45 pointer-events-none blur-xl"></div>
-                            )}
-
                             <div className="flex items-center gap-4 min-w-0 z-10">
-                              <div className="relative">
-                                <ChannelAvatar channelId={channelId} title={name} size="sm" isActive={isActive} />
-                                {isActive && (
-                                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-success border-2 border-surface rounded-full shadow-[0_0_8px_rgba(var(--color-success),0.6)]"></div>
-                                )}
-                              </div>
+                              <ChannelAvatar channelId={channelId} title={name} size="sm" />
                               <div className="min-w-0">
                                 <h4 className="font-semibold text-sm tracking-tight mb-0.5 truncate flex items-center gap-2">
                                   {name}
-                                  {isActive && <span className="bg-success/15 text-success text-[9px] uppercase tracking-bolder font-bold px-1.5 py-0.5 rounded-sm">Active</span>}
+                                  {isActive && <span className="bg-success/10 text-success text-[10px] font-medium px-2 py-0.5 rounded-full">Active</span>}
                                 </h4>
-                                <div className="text-[11px] text-secondary/80 tracking-wide truncate font-medium">
+                                <div className="text-[11px] text-secondary font-medium tracking-wide truncate">
                                   ID: {channelId}
                                 </div>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-4 shrink-0 z-10 transition-all">
-                              <label className="relative inline-flex items-center cursor-pointer scale-90" title={instantOn ? "Instant Entry: ON - direction-only posts trade immediately" : "Instant Entry: OFF"}>
-                                <input
-                                  type="checkbox"
-                                  checked={instantOn}
-                                  onChange={() => handleToggleInstantEntry(channel.id, instantOn ? 1 : 0)}
-                                  className="sr-only peer"
-                                />
-                                <div className={`w-10 h-5.5 rounded-full border peer-focus:outline-none relative transition-colors ${instantOn ? 'bg-accent border-accent' : 'bg-elevated border-border/50'} after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:after:bg-white peer-checked:after:translate-x-full`}></div>
-                                <span className={`ml-2 text-[10px] font-bold uppercase tracking-wider ${instantOn ? 'text-accent' : 'text-secondary'}`}>Instant</span>
-                              </label>
-                              <label className="relative inline-flex items-center cursor-pointer scale-90" title={isActive ? "Pause Monitoring" : "Resume Monitoring"}>
-                                <input type="checkbox" checked={isActive} onChange={() => handleToggleChannel(channel.id, channel.isActive)} className="sr-only peer" />
-                                <div className="w-10 h-5.5 bg-elevated border border-border/50 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-secondary after:border-border after:border after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:bg-success peer-checked:border-success peer-checked:after:bg-white shadow-inner"></div>
-                              </label>
-                              <div className="w-px h-6 bg-border/50"></div>
-                              <button onClick={() => handleDeleteChannel(channel.id)} className="text-secondary/50 hover:text-destructive hover:bg-destructive/10 p-1.5 rounded-md transition-all" title="Remove Channel">
+                            <div className="flex items-center gap-2 shrink-0 z-10">
+                              <button
+                                onClick={() => handleToggleInstantEntry(channel.id, instantOn ? 1 : 0)}
+                                className={`group/btn relative flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors border ${
+                                  instantOn 
+                                    ? 'bg-accent/10 text-accent border-accent/20 hover:bg-accent/20' 
+                                    : 'bg-elevated text-secondary border-border hover:bg-border/50 hover:text-primary'
+                                }`}
+                              >
+                                <Zap size={14} className={instantOn ? "fill-accent" : ""} />
+                                <span>Instant</span>
+                                <div className="relative group/hint flex items-center">
+                                  <Info size={12} className="opacity-50 hover:opacity-100 cursor-help" />
+                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-primary text-primary-foreground text-[10px] rounded shadow-lg opacity-0 invisible group-hover/hint:opacity-100 group-hover/hint:visible transition-all z-50 normal-case font-normal text-center pointer-events-none">
+                                    {instantOn 
+                                      ? "ON: Trades execute immediately at the current market price when a signal is received." 
+                                      : "OFF: Bot sets limit orders and waits for the market to hit the specified entry price."}
+                                  </div>
+                                </div>
+                              </button>
+                              
+                              <button
+                                onClick={() => handleToggleChannel(channel.id, channel.isActive)}
+                                className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors border ${
+                                  isActive
+                                    ? 'bg-success/10 text-success border-success/20 hover:bg-success/20'
+                                    : 'bg-elevated text-secondary border-border hover:bg-border/50 hover:text-primary'
+                                }`}
+                                title={isActive ? "Pause Monitoring" : "Resume Monitoring"}
+                              >
+                                {isActive ? <Pause size={14} className="fill-success" /> : <Play size={14} className="fill-secondary" />}
+                              </button>
+                              
+                              <div className="w-px h-5 bg-border mx-2"></div>
+                              
+                              <button onClick={() => handleDeleteChannel(channel.id)} className="text-secondary hover:text-destructive hover:bg-destructive/10 p-1.5 rounded-md transition-colors" title="Remove Channel">
                                 <Trash2 size={16} />
                               </button>
                             </div>

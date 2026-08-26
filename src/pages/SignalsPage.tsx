@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { Search, CheckCircle2, XCircle, MessageSquare, Activity, AlertTriangle } from "lucide-react"
+import { Search, CheckCircle2, XCircle, MessageSquare, Bot, AlertTriangle, Zap, Copy } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { toast } from "sonner"
 import { useSignalStore, type UiSignal } from "../store/signals"
@@ -20,7 +20,7 @@ export function SignalsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [executingIds, setExecutingIds] = useState<string[]>([])
   const [simulating, setSimulating] = useState(false)
-  const signals = useSignalStore(state => state.signals);
+  const { signals, updateSignal } = useSignalStore();
   const { isConnected: mt5Connected, balance: mt5Balance, currency: mt5Currency } = useMT5Store();
   const riskPerTrade = useSettingsStore(state => state.riskConfig.riskPerTradePercent);
 
@@ -99,6 +99,7 @@ export function SignalsPage() {
       });
 
       if (executed) {
+        updateSignal(signal.id, { outcome: 'EXECUTED' });
         toast.success(`Trade Executed: ${parsed.symbol}`, {
           description: `Size: ${positionSize ?? 'minimum'} lots`,
         });
@@ -186,7 +187,7 @@ export function SignalsPage() {
             disabled={simulating}
             className="px-4 py-1.5 bg-accent/10 text-accent border border-accent/20 rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-all flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
           >
-            <Activity size={14} /> {simulating ? "Simulating..." : "Simulate BTC"}
+            <Bot size={14} /> {simulating ? "Simulating..." : "Simulate BTC"}
           </button>
         </div>
       </div>
@@ -212,7 +213,7 @@ export function SignalsPage() {
                 <td colSpan={9} className="py-24">
                   <div className="flex flex-col items-center justify-center text-center">
                     <div className="w-16 h-16 bg-elevated rounded-full flex items-center justify-center text-secondary mb-4 shadow-sm relative">
-                      <Activity size={24} />
+                      <Bot size={24} />
                     </div>
                     <h4 className="text-lg font-medium mb-2">
                       {signals.length === 0 ? "Waiting for incoming signals..." : "No signals match your filters"}
@@ -268,91 +269,121 @@ export function SignalsPage() {
                             exit={{ height: 0, opacity: 0 }}
                             className="overflow-hidden border-b border-border bg-surface/50"
                           >
-                            <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            <div className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-border bg-elevated/20">
                               {/* Raw Message Column */}
-                              <div className="bg-elevated/50 p-6 rounded-xl border border-border">
-                                <h4 className="text-[11px] font-bold text-secondary uppercase tracking-widest mb-4 flex items-center gap-2">
-                                  <MessageSquare size={14} /> Raw Intercept
+                              <div className="p-6 lg:p-8">
+                                <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider mb-4 flex items-center gap-2">
+                                  <MessageSquare size={14} className="text-accent" /> Raw Intercept
                                 </h4>
-                                <pre className="text-[12px] font-mono text-primary leading-relaxed whitespace-pre-wrap bg-surface p-4 rounded-lg border border-border/50 shadow-inner max-h-[300px] overflow-y-auto">
-                                  {signal.raw}
-                                </pre>
+                                <div className="relative group/code">
+                                  <pre className="text-[13px] font-mono text-primary/80 leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto mt-2">
+                                    {signal.raw}
+                                  </pre>
+                                  <button 
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(signal.raw);
+                                      toast.success("Copied to clipboard");
+                                    }}
+                                    className="absolute top-2 right-2 p-1.5 bg-elevated border border-border rounded text-secondary hover:text-primary hover:bg-border transition-colors opacity-0 group-hover/code:opacity-100"
+                                    title="Copy raw signal"
+                                  >
+                                    <Copy size={14} />
+                                  </button>
+                                </div>
                               </div>
 
                               {/* Validation Checklist Column */}
-                              <div className="bg-elevated/50 p-6 rounded-xl border border-border">
-                                <h4 className="text-[11px] font-bold text-secondary uppercase tracking-widest mb-4 flex items-center gap-2">
-                                  <CheckCircle2 size={14} /> Parsing & Validation
+                              <div className="p-6 lg:p-8">
+                                <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider mb-4 flex items-center gap-2">
+                                  <CheckCircle2 size={14} className="text-success" /> Parsing & Validation
                                 </h4>
-                                <div className="space-y-3 text-[13px] bg-surface p-4 rounded-lg border border-border/50">
+                                <div className="space-y-3 mt-2">
                                   {signal.validation.map((v: any, i: number) => (
-                                    <div key={i} className="flex items-center gap-3 p-1.5 rounded-md hover:bg-elevated/50 transition-colors">
+                                    <div key={i} className="flex items-start gap-3">
                                       {v.status ? (
-                                        <CheckCircle2 size={16} className="text-success shrink-0" />
+                                        <CheckCircle2 size={16} className="text-success shrink-0 mt-0.5" />
                                       ) : (
-                                        <XCircle size={16} className="text-destructive shrink-0" />
+                                        <XCircle size={16} className="text-destructive shrink-0 mt-0.5" />
                                       )}
-                                      <span className={v.status ? 'text-primary' : 'text-destructive font-bold'}>{v.text}</span>
+                                      <span className={`text-sm leading-snug ${v.status ? 'text-primary/90' : 'text-destructive font-medium'}`}>{v.text}</span>
                                     </div>
                                   ))}
                                 </div>
                                 
                                 {signal.reason && (
-                                  <div className="mt-4 p-4 rounded-lg border border-destructive/30 bg-destructive/10">
-                                    <span className="text-[11px] font-bold text-destructive uppercase tracking-widest flex items-center gap-1.5 mb-1.5">
+                                  <div className="mt-4 p-4 rounded-lg border border-destructive/20 bg-destructive/10">
+                                    <span className="text-xs font-bold text-destructive uppercase tracking-wider flex items-center gap-1.5 mb-2">
                                       <AlertTriangle size={14} /> Execution Rejected
                                     </span>
-                                    <span className="text-[13px] text-destructive/90 leading-relaxed font-medium block">{signal.reason}</span>
+                                    <span className="text-[13px] text-destructive/90 leading-relaxed block">{signal.reason}</span>
                                   </div>
                                 )}
                               </div>
 
-                              {/* Theoretical Trade Receipt */}
-                              <div className="bg-elevated p-6 rounded-xl border border-border relative overflow-hidden shadow-lg">
-                                {/* Decorative receipt edge */}
-                                <div className="absolute top-0 left-0 w-full h-2 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIxMCI+PHBvbHlnb24gcG9pbnRzPSIwLDAgMTAsMTAgMjAsMCIgZmlsbD0iIzFBMUEyNCIvPjwvc3ZnPg==')] bg-repeat-x opacity-30"></div>
-                                
-                                <h4 className="text-[11px] font-bold text-secondary uppercase tracking-widest mb-6 mt-2 flex items-center gap-2">
-                                  <Activity size={14} /> Trade Simulation Receipt
+                              {/* Execution Summary */}
+                              <div className="p-6 lg:p-8">
+                                <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider mb-6 flex items-center gap-2">
+                                  <Zap size={14} className={signal.decision === 'APPROVED' ? 'text-success' : 'text-warning'} /> 
+                                  Execution Summary
                                 </h4>
                                 
-                                <div className="space-y-4">
-                                  <div className="flex justify-between items-end border-b border-border/50 pb-3">
-                                    <span className="text-sm text-secondary">Theoretical Risk ({riskPerTrade}%)</span>
+                                <div className="space-y-1 mt-2">
+                                  <div className="flex justify-between items-center py-2.5 border-b border-border/50">
+                                    <span className="text-sm text-secondary">Risk ({riskPerTrade}%)</span>
                                     {mt5Connected ? (
-                                      <span className="text-lg font-mono font-bold text-destructive">
+                                      <span className="text-base font-mono font-medium text-destructive">
                                         {formatMoney(mt5Balance * (riskPerTrade / 100), mt5Currency)}
                                       </span>
                                     ) : (
-                                      <span className="text-sm font-mono text-secondary/50 flex items-center gap-1"><AlertTriangle size={12}/> MT5 Disconnected</span>
+                                      <span className="text-xs font-mono text-secondary/50 flex items-center gap-1"><AlertTriangle size={12}/> Disconnected</span>
                                     )}
                                   </div>
 
-                                  <div className="flex justify-between items-end border-b border-border/50 pb-3">
+                                  <div className="flex justify-between items-center py-2.5 border-b border-border/50">
                                     <span className="text-sm text-secondary">Potential Reward</span>
                                     {mt5Connected && signal.rr > 0 ? (
-                                      <span className="text-lg font-mono font-bold text-success">
+                                      <span className="text-base font-mono font-medium text-success">
                                         {formatMoney(mt5Balance * (riskPerTrade / 100) * signal.rr, mt5Currency)}
                                       </span>
                                     ) : (
-                                      <span className="text-sm font-mono text-secondary/50">N/A</span>
+                                      <span className="text-xs font-mono text-secondary/50">N/A</span>
                                     )}
                                   </div>
 
-                                  <div className="flex justify-between items-end border-b border-border/50 pb-3">
+                                  <div className="flex justify-between items-center py-2.5">
                                     <span className="text-sm text-secondary">Action</span>
-                                    <span className={`text-lg font-bold uppercase ${signal.direction === 'BUY' ? 'text-success' : 'text-destructive'}`}>
+                                    <span className={`text-base font-bold uppercase tracking-wide ${signal.direction === 'BUY' ? 'text-success' : 'text-destructive'}`}>
                                       {signal.direction} {signal.symbol}
                                     </span>
                                   </div>
                                 </div>
+
+                                {mt5Connected && signal.rr > 0 && signal.decision === 'APPROVED' && (
+                                  <div className="mt-4 pt-4 border-t border-border/50">
+                                    <div className="flex justify-between text-xs font-medium text-secondary mb-2">
+                                      <span>Risk (1.0)</span>
+                                      <span>Reward ({signal.rr.toFixed(1)})</span>
+                                    </div>
+                                    <div className="h-1.5 w-full bg-elevated rounded-full overflow-hidden flex">
+                                      <div className="bg-destructive h-full transition-all" style={{ width: `${(1 / (1 + signal.rr)) * 100}%` }}></div>
+                                      <div className="bg-success h-full transition-all" style={{ width: `${(signal.rr / (1 + signal.rr)) * 100}%` }}></div>
+                                    </div>
+                                  </div>
+                                )}
                                 
-                                <div className="mt-8 pt-4 flex gap-4">
-                                  {signal.decision === 'APPROVED' ? (
+                                <div className="mt-6 flex">
+                                  {signal.outcome === 'EXECUTED' ? (
+                                    <button
+                                      disabled
+                                      className="flex-1 bg-elevated text-secondary border border-border font-bold py-3.5 rounded-lg text-sm cursor-not-allowed flex items-center justify-center gap-2 opacity-60"
+                                    >
+                                      <CheckCircle2 size={16} /> Already Executed
+                                    </button>
+                                  ) : signal.decision === 'APPROVED' ? (
                                     <button
                                       onClick={() => handleManualExecute(signal, false)}
                                       disabled={executingIds.includes(signal.id)}
-                                      className="flex-1 bg-success text-success-foreground font-bold py-2.5 rounded-lg text-sm hover:bg-success/90 transition-colors shadow-lg shadow-success/20 disabled:opacity-50"
+                                      className="flex-1 bg-accent/10 text-accent border border-accent/20 font-bold py-3.5 rounded-lg text-sm hover:bg-accent hover:text-white transition-colors disabled:opacity-50"
                                     >
                                       {executingIds.includes(signal.id) ? "Executing..." : "Execute Trade"}
                                     </button>
@@ -360,7 +391,7 @@ export function SignalsPage() {
                                     <button
                                       onClick={() => handleManualExecute(signal, true)}
                                       disabled={executingIds.includes(signal.id)}
-                                      className="flex-1 border border-destructive text-destructive font-bold py-2.5 rounded-lg text-sm hover:bg-destructive hover:text-destructive-foreground transition-all disabled:opacity-50"
+                                      className="flex-1 bg-destructive/10 border border-destructive/30 text-destructive font-bold py-3.5 rounded-lg text-sm hover:bg-destructive hover:text-destructive-foreground transition-colors disabled:opacity-50"
                                       title="Bypass the risk engine and send this signal to your broker anyway"
                                     >
                                       {executingIds.includes(signal.id) ? "Executing..." : "Force Override"}
@@ -368,7 +399,6 @@ export function SignalsPage() {
                                   )}
                                 </div>
                               </div>
-
                             </div>
                           </motion.div>
                         </td>

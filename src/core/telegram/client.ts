@@ -38,7 +38,10 @@ export class TelegramAdapter {
         phoneNumber: phoneNumberProvider,
         password: passwordProvider,
         phoneCode: codeProvider,
-        onError: (err: Error) => logger.error({ err }, 'Telegram auth error'),
+        onError: (err: Error) => {
+          logger.error({ err }, 'Telegram auth error');
+          throw err;
+        },
       });
 
       this.state = 'CONNECTED';

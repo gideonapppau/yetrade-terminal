@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTelegramStore } from '../../store/telegram';
 import { TelegramAdapter } from '../../core/telegram/client';
 import type { TelegramConfig } from '../../core/telegram/types';
-import { Activity } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 export function TelegramAuth() {
@@ -80,7 +80,7 @@ export function TelegramAuth() {
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="card p-8 text-center max-w-sm w-full">
           <div className="w-12 h-12 bg-success/10 text-success rounded-full flex items-center justify-center mx-auto mb-4">
-            <Activity size={24} />
+            <CheckCircle2 size={24} />
           </div>
           <h2 className="text-lg font-medium mb-2">Session Active</h2>
           <p className="text-secondary text-sm mb-6">Successfully connected to Telegram.</p>

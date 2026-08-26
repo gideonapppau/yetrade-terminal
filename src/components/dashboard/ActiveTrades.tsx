@@ -1,4 +1,4 @@
-import { Activity } from "lucide-react"
+import { Briefcase } from "lucide-react"
 import { useState, useEffect } from "react"
 import { getDb } from "../../db"
 import { trades } from "../../db/schema"
@@ -35,7 +35,7 @@ export function ActiveTrades() {
     <div className="glass rounded-2xl flex flex-col h-full border border-border">
       <div className="p-6 border-b border-border">
         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-          <Activity size={18} className="text-accent" /> Active Positions
+          <Briefcase size={18} className="text-accent" /> Active Positions
         </h2>
       </div>
       

@@ -1,4 +1,38 @@
 @import "tailwindcss";
+
+@font-face {
+  font-family: 'Space Grotesk Numbers';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/spacegrotesk/v22/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj7oUUsj.ttf) format('truetype');
+  unicode-range: U+0030-0039, U+0024, U+0025, U+002B, U+002C, U+002D, U+002E, U+003A;
+}
+@font-face {
+  font-family: 'Space Grotesk Numbers';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/spacegrotesk/v22/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj7aUUsj.ttf) format('truetype');
+  unicode-range: U+0030-0039, U+0024, U+0025, U+002B, U+002C, U+002D, U+002E, U+003A;
+}
+@font-face {
+  font-family: 'Space Grotesk Numbers';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/spacegrotesk/v22/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj42Vksj.ttf) format('truetype');
+  unicode-range: U+0030-0039, U+0024, U+0025, U+002B, U+002C, U+002D, U+002E, U+003A;
+}
+@font-face {
+  font-family: 'Space Grotesk Numbers';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/spacegrotesk/v22/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj4PVksj.ttf) format('truetype');
+  unicode-range: U+0030-0039, U+0024, U+0025, U+002B, U+002C, U+002D, U+002E, U+003A;
+}
+
 @theme {
   --color-background: #F3F5F7;
   --color-surface: #FFFFFF;
@@ -22,8 +56,10 @@
   
   --color-input: #FFFFFF;
   --color-ring: #6366F1;
-  
-  --font-sans: 'Space Grotesk', sans-serif;
+
+  --font-sans: "Space Grotesk Numbers", "Onest", system-ui, sans-serif;
+  --font-heading: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "Space Grotesk", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 @layer base {
@@ -62,6 +98,11 @@
     @apply font-sans transition-colors duration-300;
   }
   
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    @apply tracking-tight;
+  }
+
   /* Ensure inputs and buttons inherit the font */
   input, button, select, textarea {
     @apply font-sans;
@@ -79,7 +120,6 @@
     @apply transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] hover:-translate-y-1;
   }
 }
-
 
 /* Custom Phone Input Styles */
 .custom-phone-input {
@@ -112,3 +152,4 @@
   color: var(--color-secondary);
   opacity: 0.7;
 }
+

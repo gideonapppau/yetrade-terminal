@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Shield, ShieldAlert, Activity, Save, CheckCircle2 } from "lucide-react"
+import { Shield, ShieldAlert, TrendingDown, Save, CheckCircle2 } from "lucide-react"
 import { getDb } from "../db"
 import { telegramChannels } from "../db/schema"
 import { eq } from "drizzle-orm"
@@ -329,7 +329,7 @@ export function RiskPage() {
         <div className="col-span-12 lg:col-span-4">
           <div className="card p-6 sticky top-8">
             <h3 className="font-medium text-lg mb-6 flex items-center gap-2">
-              <Activity size={18} className="text-secondary" />
+              <TrendingDown size={18} className="text-secondary" />
               Risk Simulator
             </h3>
             
@@ -357,7 +357,7 @@ export function RiskPage() {
                 </>
               ) : (
                 <>
-                  <Activity size={24} className="text-secondary opacity-50 mb-3" />
+                  <Shield size={24} className="text-secondary opacity-50 mb-3" />
                   <span className="text-sm font-medium mb-1">Waiting for live quotes</span>
                   <span className="text-xs text-secondary">Connect your broker to simulate risk.</span>
                 </>
