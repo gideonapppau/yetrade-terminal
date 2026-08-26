@@ -13,7 +13,16 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "bin/python-server",
+          "name": "python-server",
+          "sidecar": true
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "python-server",
           "sidecar": true
         }
       ]

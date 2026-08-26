@@ -3,7 +3,8 @@ import { useTelegramStore } from '../../store/telegram';
 import { TelegramAdapter } from '../../core/telegram/client';
 import type { TelegramConfig } from '../../core/telegram/types';
 import { Activity } from 'lucide-react';
-
+import PhoneInput from 'react-phone-number-input';
+import 'react-phone-number-input/style.css';
 export function TelegramAuth() {
   const { connectionState, setConnectionState, setConfig } = useTelegramStore();
   const [apiId, setApiId] = useState('');
@@ -140,12 +141,12 @@ export function TelegramAuth() {
             
             <div className="pt-2">
               <label className="block text-sm font-medium mb-1">Phone Number</label>
-              <input 
-                type="text" 
-                className="w-full bg-elevated border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+              <PhoneInput 
+                international
+                defaultCountry="US"
                 value={phoneNumber}
-                onChange={e => setPhoneNumber(e.target.value)}
-                placeholder="+1234567890"
+                onChange={(value) => setPhoneNumber(value || '')}
+                className="w-full bg-elevated border border-border rounded-lg px-3 py-2 text-sm focus-within:border-accent custom-phone-input"
               />
             </div>
             
