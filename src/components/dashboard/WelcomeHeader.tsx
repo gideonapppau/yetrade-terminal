@@ -43,7 +43,7 @@ export function WelcomeHeader() {
         transition={{ delay: 0.2, duration: 0.5 }}
       >
         <h1 className="text-3xl font-medium text-primary mb-2">Welcome, Trader</h1>
-        <p className="text-secondary text-sm">Track user activity, trading trends, and crypto revenue with real time analytics.</p>
+        <p className="text-secondary text-sm">Signals from your Telegram channels, risk-checked and executed on MetaTrader 5.</p>
       </motion.div>
       
       <div className="flex gap-12">

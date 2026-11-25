@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTelegramStore } from '../../store/telegram';
 import { TelegramAdapter } from '../../core/telegram/client';
 import type { TelegramConfig } from '../../core/telegram/types';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2 } from '../ui/icons';
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 export function TelegramAuth() {

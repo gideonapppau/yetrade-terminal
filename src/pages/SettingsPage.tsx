@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Settings, Save, Smartphone, MonitorDot, Link2, CheckCircle2, Search, Trash2, RefreshCw, Radio, PencilLine, Zap, Info, Play, Pause } from "lucide-react"
+import { Settings, Save, Smartphone, MonitorDot, Link2, CheckCircle2, Search, Trash2, RefreshCw, Radio, PencilLine, Zap, Info, Play, Pause } from "../components/ui/icons"
 import { getDb } from "../db"
 import { telegramChannels } from "../db/schema"
 import { eq } from "drizzle-orm"
@@ -881,7 +881,7 @@ export function SettingsPage() {
                                     : 'bg-elevated text-secondary border-border hover:bg-border/50 hover:text-primary'
                                 }`}
                               >
-                                <Zap size={14} className={instantOn ? "fill-accent" : ""} />
+                                <Zap size={14} className={instantOn ? "text-accent" : ""} />
                                 <span>Instant</span>
                                 <div className="relative group/hint flex items-center">
                                   <Info size={12} className="opacity-50 hover:opacity-100 cursor-help" />
@@ -902,7 +902,7 @@ export function SettingsPage() {
                                 }`}
                                 title={isActive ? "Pause Monitoring" : "Resume Monitoring"}
                               >
-                                {isActive ? <Pause size={14} className="fill-success" /> : <Play size={14} className="fill-secondary" />}
+                                {isActive ? <Pause size={14} className="text-success" /> : <Play size={14} className="text-secondary" />}
                               </button>
                               
                               <div className="w-px h-5 bg-border mx-2"></div>

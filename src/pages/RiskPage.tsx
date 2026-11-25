@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Shield, ShieldAlert, TrendingDown, Save, CheckCircle2 } from "lucide-react"
+import { Shield, ShieldAlert, TrendingDown, Save, CheckCircle2 } from "../components/ui/icons"
 import { getDb } from "../db"
 import { telegramChannels } from "../db/schema"
 import { eq } from "drizzle-orm"

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { Award } from "lucide-react"
+import { Award } from "../ui/icons"
 import { getDb } from "../../db"
 import { telegramChannels } from "../../db/schema"
 import { logger } from "../../core/logger"

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { Target, RefreshCw } from "lucide-react"
+import { Target } from "../ui/icons"
 import { getDb } from "../../db"
 import { trades } from "../../db/schema"
 import { logger } from "../../core/logger"
@@ -71,9 +71,6 @@ export function YourAssetsCard() {
         <div>
           <h3 className="font-medium text-lg">Top Traded Pairs</h3>
           <p className="text-xs text-secondary">Based on execution history</p>
-        </div>
-        <div className="text-xs text-secondary flex items-center gap-2">
-          Live <button className="p-1.5 bg-elevated rounded-full hover:bg-border transition-colors"><RefreshCw size={12} /></button>
         </div>
       </div>
       

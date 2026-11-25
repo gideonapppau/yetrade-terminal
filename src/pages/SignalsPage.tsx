@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { Search, CheckCircle2, XCircle, MessageSquare, Bot, AlertTriangle, Zap, Copy } from "lucide-react"
+import { Search, CheckCircle2, XCircle, MessageSquare, Bot, AlertTriangle, Zap, Copy } from "../components/ui/icons"
 import { motion, AnimatePresence } from "framer-motion"
 import { toast } from "sonner"
 import { useSignalStore, type UiSignal } from "../store/signals"

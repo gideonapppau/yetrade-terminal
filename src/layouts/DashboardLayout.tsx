@@ -3,13 +3,12 @@ import { useTelegramStore } from "../store/telegram"
 import { useMT5Store } from "../store/mt5"
 import { useSettingsStore } from "../store/settings"
 import { useSignalStore } from "../store/signals"
-import { Bell, Search, Sun, Moon } from "lucide-react"
+import { Bell, Sun, Moon } from "../components/ui/icons"
 
 interface DashboardLayoutProps {
   children: React.ReactNode
   activePage: string
   onPageChange: (page: string) => void
-  onOpenCommandPalette?: () => void
 }
 
 function formatTimeAgo(ts: number): string {
@@ -21,7 +20,7 @@ function formatTimeAgo(ts: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function DashboardLayout({ children, activePage, onPageChange, onOpenCommandPalette }: DashboardLayoutProps) {
+export function DashboardLayout({ children, activePage, onPageChange }: DashboardLayoutProps) {
   const { connectionState, profile, logout, client } = useTelegramStore();
   const mt5Connected = useMT5Store((s) => s.isConnected);
   const tradingPaused = useSettingsStore((s) => s.tradingPaused);
@@ -114,13 +113,6 @@ export function DashboardLayout({ children, activePage, onPageChange, onOpenComm
             </span>
           )}
           <div className="flex items-center gap-4 text-secondary">
-            <button
-              onClick={() => onOpenCommandPalette?.()}
-              title="Search commands (Ctrl+K)"
-              className="p-2 hover:bg-elevated rounded-full transition-colors"
-            >
-              <Search size={18} />
-            </button>
             <div className="relative" ref={notifRef}>
               <button
                 onClick={() => setIsNotifOpen(!isNotifOpen)}
@@ -255,14 +247,6 @@ export function DashboardLayout({ children, activePage, onPageChange, onOpenComm
                 Offline
               </span>
             )}
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <span className="text-secondary font-bold">Local DB</span>
-            <span className="flex items-center gap-1.5 text-success font-bold">
-              <span className="w-1.5 h-1.5 rounded-full bg-success"></span>
-              Synced
-            </span>
           </div>
         </div>
         
