@@ -9,6 +9,8 @@ import { getBridgeToken } from '../core/bridge-auth';
 interface MT5State {
   isConnected: boolean;
   isConnecting: boolean;
+  /** MT5 "Algo Trading" switch; null when unknown. Off = every order fails. */
+  autoTradingEnabled: boolean | null;
   balance: number;
   equity: number;
   currency: string;
@@ -45,6 +47,7 @@ const createAdapter = () =>
 export const useMT5Store = create<MT5State>((set, get) => ({
   isConnected: false,
   isConnecting: false,
+  autoTradingEnabled: null,
   balance: 0,
   equity: 0,
   currency: 'USD',
@@ -96,6 +99,7 @@ export const useMT5Store = create<MT5State>((set, get) => ({
 
     if (connected) {
       set({ isConnected: true, isConnecting: false });
+      applyAutoTradingState(adapter.autoTradingEnabled);
       await syncAccountInfo();
     } else {
       set({ isConnected: false, isConnecting: false });
@@ -156,6 +160,7 @@ export const useMT5Store = create<MT5State>((set, get) => ({
       } catch {
         alive = false;
       }
+      if (alive) applyAutoTradingState(adapter.autoTradingEnabled);
       if (alive === isConnected) return;
 
       // Flap protection: a bridge that flickers between reachable and not
@@ -191,6 +196,25 @@ export const useMT5Store = create<MT5State>((set, get) => ({
     }
   },
 }));
+
+/**
+ * Records MT5's "Algo Trading" switch and warns once each time it turns off -
+ * while off, MT5 rejects every order and signals end up MISSED.
+ */
+function applyAutoTradingState(enabled: boolean | null) {
+  const previous = useMT5Store.getState().autoTradingEnabled;
+  if (enabled === previous) return;
+  useMT5Store.setState({ autoTradingEnabled: enabled });
+  if (enabled === false) {
+    toast.error('AutoTrading is off in MetaTrader 5', {
+      id: 'mt5-autotrading',
+      description: "Click the 'Algo Trading' button in the MT5 toolbar so it turns green. Until then every trade will be missed.",
+      duration: Infinity,
+    });
+  } else if (enabled === true && previous === false) {
+    toast.success('AutoTrading enabled in MetaTrader 5', { id: 'mt5-autotrading' });
+  }
+}
 
 /**
  * Spawns the local Python bridge and waits for it to bind. Tries both the

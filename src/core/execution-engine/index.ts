@@ -42,6 +42,8 @@ export class ExecutionEngine {
   private persistence: ExecutionPersistence;
   /** Notified when filled positions could not be recorded (user must act). */
   onUntrackedPositions?: (tickets: string[], request: ExecutionRequest) => void;
+  /** Why the most recent executeApprovedSignal call placed nothing (for the UI). */
+  lastFailureReason?: string;
 
   constructor(adapter: BrokerAdapter, persistence: ExecutionPersistence = createDrizzlePersistence()) {
     this.adapter = adapter;
@@ -49,11 +51,13 @@ export class ExecutionEngine {
   }
 
   async executeApprovedSignal(request: ExecutionRequest): Promise<boolean> {
+    this.lastFailureReason = undefined;
     try {
       logger.info({ signalId: request.signalId }, 'Routing approved signal to broker adapter...');
 
       if (!(request.positionSize > 0) || !Number.isFinite(request.positionSize)) {
         logger.error({ signalId: request.signalId, positionSize: request.positionSize }, 'Refusing to execute an invalid position size');
+        this.lastFailureReason = `Invalid position size (${request.positionSize})`;
         await this.persistence.markSignalStatus(request.signalId, 'MISSED');
         return false;
       }
@@ -89,6 +93,7 @@ export class ExecutionEngine {
           { signalId: request.signalId, positionSize: request.positionSize, volMin },
           'Size below broker minimum with strict policy - refusing to oversize'
         );
+        this.lastFailureReason = `Size ${request.positionSize} lots is below the broker minimum of ${volMin}`;
         await this.persistence.markSignalStatus(request.signalId, 'MISSED');
         return false;
       }
@@ -154,6 +159,7 @@ export class ExecutionEngine {
           }
         } else {
           allFilled = false;
+          this.lastFailureReason = result.message || 'Broker rejected the order';
           logger.error({ result, splitIndex: i }, 'Broker failed to execute split trade');
         }
       }
@@ -174,6 +180,7 @@ export class ExecutionEngine {
 
     } catch (err) {
       logger.error({ err, request }, 'ExecutionEngine encountered a critical error');
+      this.lastFailureReason = err instanceof Error ? err.message : String(err);
       try {
         await this.persistence.markSignalStatus(request.signalId, 'MISSED');
       } catch (persistErr) {

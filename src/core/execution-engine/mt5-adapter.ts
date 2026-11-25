@@ -11,6 +11,12 @@ export class MT5Adapter implements BrokerAdapter {
 
   name = 'MetaTrader 5 Bridge';
 
+  /**
+   * MT5's "Algo Trading" switch as of the last health probe (null = unknown,
+   * e.g. an older bridge). While false, the terminal refuses every order.
+   */
+  autoTradingEnabled: boolean | null = null;
+
   constructor(baseUrl: string = MT5_BRIDGE_DEFAULT_URL) {
     this.baseUrl = baseUrl;
   }
@@ -102,6 +108,7 @@ export class MT5Adapter implements BrokerAdapter {
       const response = await this.request(`/health`);
       if (!response.ok) return false;
       const data = await response.json();
+      this.autoTradingEnabled = typeof data.trade_allowed === 'boolean' ? data.trade_allowed : null;
       return data.status === 'ok' && data.connected;
     } catch (e) {
       logger.error({ err: e }, 'MT5 bridge health check failed');

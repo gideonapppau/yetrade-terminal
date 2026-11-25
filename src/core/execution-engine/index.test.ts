@@ -209,6 +209,19 @@ describe('ExecutionEngine.failure handling', () => {
     expect(store.insertedTrades).toHaveLength(0);
     expect(store.statuses.get('sig-1')).toBe('MISSED');
   });
+
+  it("exposes the broker's rejection reason and clears it on the next success", async () => {
+    configureExecution(false, '2');
+    const reason = "AutoTrading is disabled in MetaTrader 5";
+    const adapter = new MockAdapter(FX_INFO, [{ success: false, message: reason }, { success: true }]);
+    const engine = new ExecutionEngine(adapter, new FakeStore());
+
+    expect(await engine.executeApprovedSignal(request(0.1))).toBe(false);
+    expect(engine.lastFailureReason).toBe(reason);
+
+    expect(await engine.executeApprovedSignal(request(0.1))).toBe(true);
+    expect(engine.lastFailureReason).toBeUndefined();
+  });
 });
 
 describe('ExecutionEngine - invalid sizes', () => {

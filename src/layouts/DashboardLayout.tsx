@@ -23,6 +23,7 @@ function formatTimeAgo(ts: number): string {
 export function DashboardLayout({ children, activePage, onPageChange }: DashboardLayoutProps) {
   const { connectionState, profile, logout, client } = useTelegramStore();
   const mt5Connected = useMT5Store((s) => s.isConnected);
+  const autoTradingEnabled = useMT5Store((s) => s.autoTradingEnabled);
   const tradingPaused = useSettingsStore((s) => s.tradingPaused);
   const allSignals = useSignalStore((s) => s.signals);
   const [isDark, setIsDark] = useState(() => {
@@ -229,6 +230,23 @@ export function DashboardLayout({ children, activePage, onPageChange }: Dashboar
             )}
           </div>
           
+          {mt5Connected && autoTradingEnabled !== null && (
+            <div className="flex items-center gap-2" title="MetaTrader 5 'Algo Trading' button">
+              <span className="text-secondary font-bold">AutoTrading</span>
+              {autoTradingEnabled ? (
+                <span className="flex items-center gap-1.5 text-success font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-success"></span>
+                  On
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-destructive font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-destructive"></span>
+                  Off - enable in MT5
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <span className="text-secondary font-bold">Telegram API</span>
             {connectionState === 'CONNECTED' ? (

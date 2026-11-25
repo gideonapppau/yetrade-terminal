@@ -478,9 +478,11 @@ export class TelegramService {
       }
 
       if (!executed) {
+        rejectReason = this.executionEngine.lastFailureReason || 'The broker could not fill the trade.';
         playSound(playError);
         toast.error(`Execution Missed: ${parsed.symbol}`, {
-          description: 'The broker could not fill the trade.',
+          description: rejectReason,
+          duration: 15000,
         });
       }
     } else {

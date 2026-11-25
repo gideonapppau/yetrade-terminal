@@ -218,7 +218,12 @@ def health_check():
     terminal_info = mt5.terminal_info()
     if terminal_info is None:
         return jsonify({"status": "error", "connected": False, "detail": "MT5 terminal not connected"}), 200
-    return jsonify({"status": "ok", "connected": terminal_info.connected})
+    return jsonify({
+        "status": "ok",
+        "connected": terminal_info.connected,
+        # False while MT5's "Algo Trading" button is off: every order fails
+        "trade_allowed": bool(terminal_info.trade_allowed),
+    })
 
 @app.route("/account", methods=["GET"])
 def get_account_info():
@@ -419,6 +424,15 @@ def execute_trade():
 
     if not symbol or not action:
         return jsonify({"success": False, "message": "Missing symbol or action"}), 400
+
+    # MT5 rejects every API order (retcode 10027) while the terminal's
+    # "Algo Trading" button is off - say so plainly instead of a bare retcode.
+    term = mt5.terminal_info()
+    if term is not None and not term.trade_allowed:
+        msg = ("AutoTrading is disabled in MetaTrader 5 - click the 'Algo Trading' "
+               "button in the MT5 toolbar so it turns green")
+        logger.error(msg)
+        return jsonify({"success": False, "message": msg}), 409
 
     if not mt5.symbol_select(symbol, True):
         return jsonify({"success": False, "message": f"Symbol {symbol} not found"}), 400
