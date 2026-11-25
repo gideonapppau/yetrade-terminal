@@ -197,7 +197,11 @@ pub fn run() {
             // Spawn the Python server sidecar
             let sidecar_command = app.shell().sidecar("python-server")
                 .expect("failed to create `python-server` binary command")
-                .env("BRIDGE_TOKEN", &token);
+                .env("BRIDGE_TOKEN", &token)
+                // Lets the bridge exit when the app does. PyInstaller onefile
+                // runs the server in a child process that killing the sidecar
+                // does not reach, so orphans kept holding the bridge port.
+                .env("APP_PID", std::process::id().to_string());
             let (mut rx, mut child) = sidecar_command
                 .spawn()
                 .expect("Failed to spawn sidecar");

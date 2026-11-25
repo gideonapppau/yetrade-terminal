@@ -103,6 +103,47 @@ def shutdown_event():
 # Register shutdown
 atexit.register(shutdown_event)
 
+
+def _exit_when_app_exits():
+    """Terminate once the launching app process is gone.
+
+    Without this the bridge outlives the app (PyInstaller's onefile child is
+    not killed with the sidecar), keeps the port bound with a stale token,
+    and the next launch's bridge cannot start."""
+    raw = os.environ.get("APP_PID")
+    if not raw:
+        return  # started by hand (dev mode)
+    try:
+        app_pid = int(raw)
+    except ValueError:
+        return
+
+    if os.name == "nt":
+        import ctypes
+        SYNCHRONIZE = 0x00100000
+        INFINITE = 0xFFFFFFFF
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(SYNCHRONIZE, False, app_pid)
+        if handle:
+            kernel32.WaitForSingleObject(handle, INFINITE)
+            kernel32.CloseHandle(handle)
+    else:
+        while True:
+            try:
+                os.kill(app_pid, 0)
+            except OSError:
+                break
+            time.sleep(2)
+
+    logger.info("App process exited - shutting down bridge")
+    try:
+        mt5.shutdown()
+    finally:
+        os._exit(0)
+
+
+threading.Thread(target=_exit_when_app_exits, daemon=True).start()
+
 # --- Endpoints ---
 @app.route("/login", methods=["POST"])
 def login_broker():
