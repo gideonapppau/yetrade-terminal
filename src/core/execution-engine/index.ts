@@ -4,6 +4,7 @@ import { getDb } from '../../db';
 import { trades, signals } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { useSettingsStore } from '../../store/settings';
+import { floorToStep } from '../../lib/utils';
 
 /**
  * Persistence seam for the engine. The production implementation writes to
@@ -39,6 +40,8 @@ function createDrizzlePersistence(): ExecutionPersistence {
 export class ExecutionEngine {
   private adapter: BrokerAdapter;
   private persistence: ExecutionPersistence;
+  /** Notified when filled positions could not be recorded (user must act). */
+  onUntrackedPositions?: (tickets: string[], request: ExecutionRequest) => void;
 
   constructor(adapter: BrokerAdapter, persistence: ExecutionPersistence = createDrizzlePersistence()) {
     this.adapter = adapter;
@@ -48,6 +51,12 @@ export class ExecutionEngine {
   async executeApprovedSignal(request: ExecutionRequest): Promise<boolean> {
     try {
       logger.info({ signalId: request.signalId }, 'Routing approved signal to broker adapter...');
+
+      if (!(request.positionSize > 0) || !Number.isFinite(request.positionSize)) {
+        logger.error({ signalId: request.signalId, positionSize: request.positionSize }, 'Refusing to execute an invalid position size');
+        await this.persistence.markSignalStatus(request.signalId, 'MISSED');
+        return false;
+      }
 
       const settings = useSettingsStore.getState().executionSettings;
       const rejectBelowMinVolume = useSettingsStore.getState().riskConfig.rejectBelowMinVolume === true;
@@ -98,18 +107,14 @@ export class ExecutionEngine {
         numSplits = maxAffordableSplits;
       }
 
-      // Derive decimal precision from the broker's own step: some instruments
-      // quote 0.001-lot increments and a hard-coded toFixed(2) would corrupt
-      // every order.
-      const stepDecimals = (String(volStep).split('.')[1] || '').length;
+      // Round DOWN to the broker's own step (some instruments quote 0.001-lot
+      // increments) so realized risk never exceeds the configured risk.
       const rawSplitSize = request.positionSize / numSplits;
-      // Round DOWN to the nearest valid step so realized risk never exceeds
-      // the configured risk per trade.
-      const steppedSize = Math.floor(rawSplitSize / volStep) * volStep;
-      const splitSize = Number(Math.max(volMin, steppedSize).toFixed(stepDecimals));
+      const splitSize = Math.max(volMin, floorToStep(rawSplitSize, volStep));
 
       let allFilled = true;
       let executedAtLeastOne = false;
+      const untrackedTickets: string[] = [];
 
       for (let i = 0; i < numSplits; i++) {
         const tpPrice = tpsToUse[i] || tpsToUse[tpsToUse.length - 1];
@@ -127,16 +132,26 @@ export class ExecutionEngine {
         const result: ExecutionResult = await this.adapter.executeTrade(splitRequest);
 
         if (result.success && result.tradeId) {
-          await this.persistence.insertTrade({
-            id: result.tradeId,
-            signalId: request.signalId,
-            symbol: request.signal.symbol,
-            direction: request.signal.direction,
-            volume: splitSize,
-            entryPrice: result.entryPrice ?? request.signal.entry ?? null,
-            status: 'OPEN'
-          });
+          // The position is live at the broker from here on, whatever happens
+          // to the bookkeeping - a DB failure must not abandon it as MISSED.
           executedAtLeastOne = true;
+          try {
+            await this.persistence.insertTrade({
+              id: result.tradeId,
+              signalId: request.signalId,
+              symbol: request.signal.symbol,
+              direction: request.signal.direction,
+              volume: splitSize,
+              entryPrice: result.entryPrice ?? request.signal.entry ?? null,
+              status: 'OPEN'
+            });
+          } catch (persistErr) {
+            untrackedTickets.push(result.tradeId);
+            logger.error(
+              { err: persistErr, ticket: result.tradeId, signalId: request.signalId },
+              'Position opened at the broker but could not be recorded - it is NOT managed by the terminal'
+            );
+          }
         } else {
           allFilled = false;
           logger.error({ result, splitIndex: i }, 'Broker failed to execute split trade');
@@ -146,6 +161,9 @@ export class ExecutionEngine {
       if (executedAtLeastOne) {
         if (!allFilled) {
           logger.warn({ signalId: request.signalId }, 'Only some TP splits filled - marking EXECUTED');
+        }
+        if (untrackedTickets.length > 0) {
+          this.onUntrackedPositions?.(untrackedTickets, request);
         }
         await this.persistence.markSignalStatus(request.signalId, 'EXECUTED');
         return true;

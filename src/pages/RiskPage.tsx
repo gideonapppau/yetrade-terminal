@@ -7,6 +7,7 @@ import { useMT5Store } from "../store/mt5"
 import { useSettingsStore } from "../store/settings"
 import { formatMoney } from "../lib/utils"
 import { logger } from "../core/logger"
+import { DEFAULT_MAX_POSITION_SIZE_LOTS } from "../core/constants"
 
 export function RiskPage() {
   const [channels, setChannels] = useState<any[]>([])
@@ -19,6 +20,7 @@ export function RiskPage() {
   const [maxSlippage, setMaxSlippage] = useState(riskConfig.maxSlippagePoints)
   const [newsFilter, setNewsFilter] = useState(riskConfig.newsFilterEnabled)
   const [rejectBelowMinVolume, setRejectBelowMinVolume] = useState(riskConfig.rejectBelowMinVolume === true)
+  const [maxLots, setMaxLots] = useState(riskConfig.maxPositionSizeLots ?? DEFAULT_MAX_POSITION_SIZE_LOTS)
   
   const mt5 = useMT5Store()
 
@@ -39,8 +41,16 @@ export function RiskPage() {
   }, [])
 
   /**
-   * Channel overrides must never sit below 1 (or be negative): an empty field
-   * clears the override ("use global"), anything else is floored at 1.
+   * Smallest accepted percentage. Zero or negative budgets are never
+   * meaningful, but sub-1% risk is a normal, conservative choice.
+   */
+  const MIN_PERCENT_PARAM = 0.1;
+  /** Counts (slippage points, trades per day) are whole numbers >= 1. */
+  const MIN_COUNT_PARAM = 1;
+
+  /**
+   * An empty channel field clears the override ("use global"); anything
+   * else is floored at the smallest meaningful value.
    */
   const sanitizeChannelOverride = (
     value: number | null | undefined,
@@ -48,20 +58,18 @@ export function RiskPage() {
   ): number | null => {
     if (value == null || !Number.isFinite(value)) return null;
     const normalized = round ? Math.round(value) : value;
-    return Math.max(1, normalized);
+    return Math.max(round ? MIN_COUNT_PARAM : MIN_PERCENT_PARAM, normalized);
   };
 
   /**
-   * Global parameters are floored at 1 as well - a zero or negative risk
-   * budget, daily loss cap or slippage tolerance is never meaningful, and
-   * clearing a field must not zero out a safety limit.
+   * Global parameters are floored too - clearing a field must not zero out
+   * a safety limit, so it falls back to the most conservative value.
    */
-  const MIN_GLOBAL_PARAM = 1;
-
   const sanitizeGlobalParam = (value: number, opts?: { max?: number; round?: boolean }): number => {
-    if (!Number.isFinite(value)) return MIN_GLOBAL_PARAM;
+    const min = opts?.round ? MIN_COUNT_PARAM : MIN_PERCENT_PARAM;
+    if (!Number.isFinite(value)) return min;
     const rounded = opts?.round ? Math.round(value) : value;
-    return Math.min(opts?.max ?? Infinity, Math.max(MIN_GLOBAL_PARAM, rounded));
+    return Math.min(opts?.max ?? Infinity, Math.max(min, rounded));
   };
 
   // Live typing stays unrestricted (so "0." can be typed); floors apply when
@@ -78,6 +86,7 @@ export function RiskPage() {
     maxDailyLossPercent: sanitizeGlobalParam(maxDailyLoss),
     maxOpenRiskPercent: sanitizeGlobalParam(maxOpenRisk),
     maxSlippagePoints: sanitizeGlobalParam(maxSlippage, { round: true }),
+    maxPositionSizeLots: Number.isFinite(maxLots) && maxLots > 0 ? maxLots : DEFAULT_MAX_POSITION_SIZE_LOTS,
     newsFilterEnabled: newsFilter,
     rejectBelowMinVolume: rejectBelowMinVolume
   });
@@ -117,7 +126,7 @@ export function RiskPage() {
     try {
       const db = await getDb()
 
-      // Update channel overrides (re-sanitized so nothing below 1 persists)
+      // Update channel overrides (re-sanitized so nothing non-positive persists)
       for (const ch of channels) {
         await db.update(telegramChannels)
           .set({
@@ -127,7 +136,7 @@ export function RiskPage() {
           .where(eq(telegramChannels.id, ch.id))
       }
       
-      // Update global risk configuration (sanitized - never below 1)
+      // Update global risk configuration (sanitized - never non-positive)
       setRiskConfig(sanitizedRiskPatch())
       
       setSaveMessage("Settings saved successfully!")
@@ -171,10 +180,10 @@ export function RiskPage() {
                   <div className="flex items-center gap-4">
                     <input
                       type="range"
-                      min="1"
+                      min="0.1"
                       max="10.0"
                       step="0.1"
-                      value={Math.min(10, Math.max(1, globalRisk))}
+                      value={Math.min(10, Math.max(0.1, globalRisk))}
                       onChange={(e) => setGlobalRisk(Number(e.target.value))}
                       className="flex-1 h-2 bg-elevated rounded-lg appearance-none cursor-pointer accent-accent"
                     />
@@ -184,7 +193,7 @@ export function RiskPage() {
                         value={globalRisk}
                         onChange={(e) => setGlobalRisk(Number(e.target.value))}
                         onBlur={blurSanitizer(setGlobalRisk, { max: 10 })}
-                        min="1"
+                        min="0.1"
                         max="10"
                         step="0.1"
                         className="w-full bg-surface border border-border rounded-lg pl-3 pr-6 py-1.5 text-sm font-bold focus:outline-none focus:border-accent transition-colors"
@@ -197,13 +206,13 @@ export function RiskPage() {
                 <div>
                   <label className="block text-sm font-medium mb-1">Max Daily Loss (%)</label>
                   <p className="text-xs text-secondary mb-2">If reached, terminal halts trading until next day.</p>
-                  <input type="number" value={maxDailyLoss} onChange={(e) => setMaxDailyLoss(Number(e.target.value))} onBlur={blurSanitizer(setMaxDailyLoss)} min="1" step="0.5" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                  <input type="number" value={maxDailyLoss} onChange={(e) => setMaxDailyLoss(Number(e.target.value))} onBlur={blurSanitizer(setMaxDailyLoss)} min="0.1" step="0.5" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
                 </div>
                 
                 <div>
                   <label className="block text-sm font-medium mb-1">Max Open Risk (%)</label>
                   <p className="text-xs text-secondary mb-2">Total concurrent risk across all open positions.</p>
-                  <input type="number" value={maxOpenRisk} onChange={(e) => setMaxOpenRisk(Number(e.target.value))} onBlur={blurSanitizer(setMaxOpenRisk)} min="1" step="0.5" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                  <input type="number" value={maxOpenRisk} onChange={(e) => setMaxOpenRisk(Number(e.target.value))} onBlur={blurSanitizer(setMaxOpenRisk)} min="0.1" step="0.5" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
                 </div>
               </div>
 
@@ -212,6 +221,12 @@ export function RiskPage() {
                   <label className="block text-sm font-medium mb-1">Max Slippage (Points)</label>
                   <p className="text-xs text-secondary mb-2">Maximum allowed deviation from signal entry price.</p>
                   <input type="number" value={maxSlippage} onChange={(e) => setMaxSlippage(Number(e.target.value))} onBlur={blurSanitizer(setMaxSlippage, { round: true })} min="1" step="1" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Max Position Size (Lots)</label>
+                  <p className="text-xs text-secondary mb-2">Signals that size above this are rejected - usually a stop that is far too tight.</p>
+                  <input type="number" value={maxLots} onChange={(e) => setMaxLots(Number(e.target.value))} min="0.01" step="0.5" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
                 </div>
                 
                 <div>
@@ -282,7 +297,7 @@ export function RiskPage() {
                               <input
                                 type="number"
                                 step="0.1"
-                                min="1"
+                                min="0.1"
                                 placeholder="Global"
                                 value={ch.riskPerTrade == null ? "" : ch.riskPerTrade}
                                 onChange={(e) => handleChannelRiskChange(ch.id, 'riskPerTrade', e.target.value)}

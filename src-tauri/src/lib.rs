@@ -1,5 +1,51 @@
 use tauri_plugin_sql::{Migration, MigrationKind};
 
+/// Per-launch secret the Python bridge requires on every request, so only
+/// this app (not arbitrary local web pages) can drive the broker.
+struct BridgeToken(String);
+
+#[tauri::command]
+fn bridge_token(state: tauri::State<'_, BridgeToken>) -> String {
+    state.0.clone()
+}
+
+/// OS credential store (Windows Credential Manager / macOS Keychain) for
+/// secrets that must never sit in plaintext webview storage. Only the keys
+/// listed here are reachable from the frontend.
+const SECRET_SERVICE: &str = "com.yetrade.app";
+const ALLOWED_SECRETS: &[&str] = &["telegram_session", "telegram_api_hash"];
+
+fn secret_entry(key: &str) -> Result<keyring::Entry, String> {
+    if !ALLOWED_SECRETS.contains(&key) {
+        return Err(format!("unknown secret '{key}'"));
+    }
+    keyring::Entry::new(SECRET_SERVICE, key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secret_get(key: String) -> Result<Option<String>, String> {
+    match secret_entry(&key)?.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn secret_set(key: String, value: String) -> Result<(), String> {
+    secret_entry(&key)?
+        .set_password(&value)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secret_delete(key: String) -> Result<(), String> {
+    match secret_entry(&key)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let migrations = vec![Migration {
@@ -72,7 +118,27 @@ pub fn run() {
         kind: MigrationKind::Up,
     }];
 
+    let token = uuid::Uuid::new_v4().simple().to_string();
+
     tauri::Builder::default()
+        // Must be registered first. Closing the window only hides it to the
+        // tray, so relaunching would otherwise start a second app + bridge
+        // that cannot bind the port and holds a different bridge token.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .manage(BridgeToken(token.clone()))
+        .invoke_handler(tauri::generate_handler![
+            bridge_token,
+            secret_get,
+            secret_set,
+            secret_delete
+        ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -85,7 +151,7 @@ pub fn run() {
                 .add_migrations("sqlite:trading-terminal.db", migrations)
                 .build(),
         )
-        .setup(|app| {
+        .setup(move |app| {
             use tauri::{
                 menu::{Menu, MenuItem},
                 tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -130,7 +196,8 @@ pub fn run() {
             
             // Spawn the Python server sidecar
             let sidecar_command = app.shell().sidecar("python-server")
-                .expect("failed to create `python-server` binary command");
+                .expect("failed to create `python-server` binary command")
+                .env("BRIDGE_TOKEN", &token);
             let (mut rx, mut child) = sidecar_command
                 .spawn()
                 .expect("Failed to spawn sidecar");

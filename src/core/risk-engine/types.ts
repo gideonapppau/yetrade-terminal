@@ -19,6 +19,12 @@ export interface RiskConfiguration {
    * which risks more than the configured percentage on small accounts.
    */
   rejectBelowMinVolume?: boolean;
+  /**
+   * Sanity ceiling on a single trade's size. A computed size above it means
+   * a broken stop (e.g. a few points wide), so the signal is rejected.
+   * Optional so persisted configs fall back to DEFAULT_MAX_POSITION_SIZE_LOTS.
+   */
+  maxPositionSizeLots?: number;
 }
 
 export interface AccountState {

@@ -140,10 +140,10 @@ export class TelegramAdapter {
         if (peer.className === 'PeerUser') ids.push(peer.userId?.toString() || '');
       };
 
+      // Only the chat the message was actually posted in counts. Matching a
+      // forward's original source would let anyone re-trigger a monitored
+      // channel's (possibly stale) signals by forwarding them into any chat.
       extract(message.peerId);
-      if (message.fwdFrom) {
-        extract(message.fwdFrom.fromId);
-      }
       return ids.filter(Boolean);
     };
 

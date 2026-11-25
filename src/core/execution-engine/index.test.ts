@@ -148,8 +148,9 @@ describe('ExecutionEngine.split planning', () => {
     expect(store.statuses.get('sig-1')).toBe('EXECUTED');
   });
 
-  it('forces a single minimum-lot trade when the size is below one leg', async () => {
+  it('forces a single minimum-lot trade below one leg under the legacy round-up policy', async () => {
     configureExecution(false);
+    useSettingsStore.getState().setRiskConfig({ rejectBelowMinVolume: false });
     const adapter = new MockAdapter(FX_INFO);
     const store = new FakeStore();
     const engine = new ExecutionEngine(adapter, store);
@@ -207,5 +208,53 @@ describe('ExecutionEngine.failure handling', () => {
     expect(adapter.calls).toHaveLength(2); // both legs attempted
     expect(store.insertedTrades).toHaveLength(0);
     expect(store.statuses.get('sig-1')).toBe('MISSED');
+  });
+});
+
+describe('ExecutionEngine - invalid sizes', () => {
+  it('refuses zero or NaN sizes without calling the broker', async () => {
+    const adapter = new MockAdapter(FX_INFO);
+    const store = new FakeStore();
+    const engine = new ExecutionEngine(adapter, store);
+
+    expect(await engine.executeApprovedSignal(request(0))).toBe(false);
+    expect(await engine.executeApprovedSignal(request(Number.NaN))).toBe(false);
+    expect(adapter.calls).toHaveLength(0);
+    expect(store.statuses.get('sig-1')).toBe('MISSED');
+  });
+
+  it('refuses sub-minimum sizes under the default strict policy', async () => {
+    const adapter = new MockAdapter(FX_INFO);
+    const store = new FakeStore();
+    const engine = new ExecutionEngine(adapter, store);
+
+    expect(await engine.executeApprovedSignal(request(0.004))).toBe(false);
+    expect(adapter.calls).toHaveLength(0);
+  });
+});
+
+describe('ExecutionEngine - bookkeeping failures', () => {
+  it('keeps executing remaining legs and reports EXECUTED when recording a fill fails', async () => {
+    const adapter = new MockAdapter({ trade_tick_value: 1, trade_tick_size: 0.00001, volume_min: 0.01, volume_step: 0.01 });
+    const store = new FakeStore();
+    let failNext = true;
+    store.insertTrade = async (trade) => {
+      if (failNext) {
+        failNext = false;
+        throw new Error('database is locked');
+      }
+      store.insertedTrades.push(trade);
+    };
+    const engine = new ExecutionEngine(adapter, store);
+    const untracked: string[] = [];
+    engine.onUntrackedPositions = (tickets) => untracked.push(...tickets);
+
+    const ok = await engine.executeApprovedSignal(request(0.2));
+
+    expect(ok).toBe(true);
+    expect(adapter.calls).toHaveLength(2);
+    expect(store.insertedTrades.map((t) => t.id)).toEqual(['t-2']);
+    expect(untracked).toEqual(['t-1']);
+    expect(store.statuses.get('sig-1')).toBe('EXECUTED');
   });
 });

@@ -13,12 +13,13 @@ let dbInstance: SqliteRemoteDatabase<typeof schema> | null = null;
 export async function getDb() {
   if (dbInstance) return dbInstance;
   
-  try {
-    // Check if we are running in Tauri context to avoid IPC exceptions in web browsers
-    if (!('__TAURI_INTERNALS__' in window) && !('__TAURI_IPC__' in window)) {
-      throw new Error('Not running in Tauri. Tauri IPC is unavailable.');
-    }
+  const inTauri = '__TAURI_INTERNALS__' in window || '__TAURI_IPC__' in window;
 
+  // Inside the real app a SQLite failure must surface - silently trading on
+  // the string-matched localStorage mock would corrupt risk accounting. The
+  // mock exists only for browser dev mode. dbInstance stays null on failure,
+  // so the next call retries the connection.
+  if (inTauri) {
     // Connect to the local SQLite database via Tauri SQL plugin
     const sqlite = await Database.load(SQLITE_DB_HANDLE);
     
@@ -142,8 +143,8 @@ export async function getDb() {
       },
       { schema }
     );
-  } catch (e) {
-    logger.warn({ err: e }, "Tauri SQL plugin unavailable - using mock localStorage database");
+  } else {
+    logger.warn("Not running in Tauri - using mock localStorage database");
     // Provide a safe fallback mock so the UI works in browser mode
     dbInstance = drizzle(
       async (sql, params, method) => {

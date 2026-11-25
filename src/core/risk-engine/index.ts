@@ -1,10 +1,11 @@
 import type { AccountState, RiskConfiguration, RiskEvaluationResult, RuleResult } from './types';
 import type { ParsedSignal } from '../signal-engine/types';
 import { logger } from '../logger';
+import { floorToStep } from '../../lib/utils';
 import {
   MIN_POSITION_SIZE_LOTS,
   POSITION_SIZE_DECIMALS,
-  MOCK_TICK_VALUE_PER_LOT,
+  DEFAULT_MAX_POSITION_SIZE_LOTS,
 } from '../constants';
 
 export class RiskEngine {
@@ -27,6 +28,16 @@ export class RiskEngine {
     const ruleResults: RuleResult[] = [];
     let isApproved = true;
 
+    // Corrupt or zero risk settings must never trade at some guessed size.
+    if (!(config.riskPerTradePercent > 0) || !Number.isFinite(config.riskPerTradePercent)) {
+      ruleResults.push({
+        ruleName: 'Risk Configuration',
+        passed: false,
+        message: `Invalid risk per trade (${config.riskPerTradePercent}%)`
+      });
+      isApproved = false;
+    }
+
     // 0. News filter (fail-closed): there is no economic-calendar integration
     // yet, so an enabled news filter blocks trading instead of pretending to
     // know the calendar.
@@ -48,15 +59,17 @@ export class RiskEngine {
     });
     if (!groupCheck) isApproved = false;
 
-    // 1b. Max open risk (approximated: each open group commits riskPerTradePercent)
+    // 1b. Max open risk (approximated: each open group commits riskPerTradePercent).
+    // The new trade's own risk counts too - the cap limits exposure AFTER it.
     const openRisk = account.openRiskPercent ?? account.openGroupsCount * config.riskPerTradePercent;
-    const openRiskCheck = openRisk < config.maxOpenRiskPercent;
+    const projectedRisk = openRisk + config.riskPerTradePercent;
+    const openRiskCheck = projectedRisk <= config.maxOpenRiskPercent + 1e-9;
     ruleResults.push({
       ruleName: 'Max Open Risk',
       passed: openRiskCheck,
       message: openRiskCheck
         ? 'Within limits'
-        : `Open risk ${openRisk.toFixed(1)}% would exceed max ${config.maxOpenRiskPercent}%`
+        : `Open risk ${projectedRisk.toFixed(1)}% would exceed max ${config.maxOpenRiskPercent}%`
     });
     if (!openRiskCheck) isApproved = false;
 
@@ -90,6 +103,34 @@ export class RiskEngine {
           : `Channel reached its daily limit (${executed}/${account.maxTradesPerDay})`
       });
       if (!channelCapCheck) isApproved = false;
+    }
+
+    // 4b. Level sanity: a BUY must risk below entry and target above it (and
+    // the reverse for a SELL). Mis-sided levels are a parse error or a typo,
+    // and the bridge would otherwise "fix" them into a different trade.
+    if (signal.entry) {
+      const isBuy = signal.direction === 'BUY';
+      const slOk = isBuy ? signal.stopLoss < signal.entry : signal.stopLoss > signal.entry;
+      ruleResults.push({
+        ruleName: 'Stop Loss Side',
+        passed: slOk,
+        message: slOk
+          ? 'Stop loss on the correct side of entry'
+          : `Stop loss ${signal.stopLoss} is not ${isBuy ? 'below' : 'above'} entry ${signal.entry} for a ${signal.direction}`
+      });
+      if (!slOk) isApproved = false;
+
+      const badTp = signal.takeProfits.find((tp) =>
+        isBuy ? !(tp.price > signal.entry!) : !(tp.price < signal.entry!)
+      );
+      if (badTp) {
+        ruleResults.push({
+          ruleName: 'Take Profit Side',
+          passed: false,
+          message: `Take profit ${badTp.price} is not ${isBuy ? 'above' : 'below'} entry ${signal.entry} for a ${signal.direction}`
+        });
+        isApproved = false;
+      }
     }
 
     // 5. RR Calculation and Check
@@ -144,8 +185,8 @@ export class RiskEngine {
 
     if (isApproved && signal.entry) {
       riskAmount = account.balance * (config.riskPerTradePercent / 100);
-      // Simple sizing formula: Position Size = Risk Amount / (StopLoss Distance * TickValue)
-      // This varies drastically by broker/instrument, using a simplified version for Phase 1
+      // Position Size = Risk Amount / money lost per lot over the stop distance,
+      // derived from the broker's own instrument metadata.
       const stopDistance = Math.abs(signal.entry - signal.stopLoss);
       if (stopDistance > 0) {
         const volMin = symbolInfo?.volume_min && symbolInfo.volume_min > 0
@@ -159,34 +200,54 @@ export class RiskEngine {
         } else if (symbolInfo && symbolInfo.trade_contract_size && symbolInfo.trade_contract_size > 0) {
           // Fallback for crypto brokers where trade_tick_value is 0
           // Risk = Price Distance * Contract Size * Lot Size
-          const monetaryRiskPerLot = stopDistance * symbolInfo.trade_contract_size!;
+          const monetaryRiskPerLot = stopDistance * symbolInfo.trade_contract_size;
           positionSize = riskAmount / monetaryRiskPerLot;
-        } else {
-          // Fallback if symbol info is completely missing (e.g. testing)
-          positionSize = riskAmount / (stopDistance * MOCK_TICK_VALUE_PER_LOT);
         }
-        
-        const scale = Math.pow(10, POSITION_SIZE_DECIMALS);
-        positionSize = Math.round(positionSize * scale) / scale;
 
-        if (positionSize < volMin) {
-          if (config.rejectBelowMinVolume) {
-            // Strict policy: never exceed the configured risk percentage.
+        if (positionSize === null) {
+          // Without broker instrument metadata the money-per-lot is unknown;
+          // any guess can be off by orders of magnitude (e.g. gold vs FX).
+          ruleResults.push({
+            ruleName: 'Position Sizing',
+            passed: false,
+            message: 'Instrument metadata unavailable - cannot size the position safely'
+          });
+          isApproved = false;
+        } else {
+          // Round DOWN to the broker's step: rounding up would risk more
+          const volStep = symbolInfo?.volume_step && symbolInfo.volume_step > 0
+            ? symbolInfo.volume_step
+            : Math.pow(10, -POSITION_SIZE_DECIMALS);
+          positionSize = floorToStep(positionSize, volStep);
+          const maxLots = config.maxPositionSizeLots ?? DEFAULT_MAX_POSITION_SIZE_LOTS;
+
+          if (positionSize > maxLots) {
             ruleResults.push({
               ruleName: 'Position Sizing',
               passed: false,
-              message: `Computed size ${positionSize.toFixed(2)} lots is below the broker minimum of ${volMin} lots`
+              message: `Computed size ${positionSize} lots exceeds the ${maxLots}-lot ceiling - stop is likely too tight`
             });
             positionSize = null;
             isApproved = false;
-          } else {
-            // Legacy policy: round up to the broker minimum (risks more than
-            // configured on small accounts) so tiny accounts can still trade.
-            logger.warn(
-              { computed: positionSize, volMin },
-              'Computed size below broker minimum - rounding up to the minimum lot size'
-            );
-            positionSize = volMin;
+          } else if (positionSize < volMin) {
+            if (config.rejectBelowMinVolume) {
+              // Strict policy: never exceed the configured risk percentage.
+              ruleResults.push({
+                ruleName: 'Position Sizing',
+                passed: false,
+                message: `Computed size ${positionSize.toFixed(2)} lots is below the broker minimum of ${volMin} lots`
+              });
+              positionSize = null;
+              isApproved = false;
+            } else {
+              // Legacy policy: round up to the broker minimum (risks more than
+              // configured on small accounts) so tiny accounts can still trade.
+              logger.warn(
+                { computed: positionSize, volMin },
+                'Computed size below broker minimum - rounding up to the minimum lot size'
+              );
+              positionSize = volMin;
+            }
           }
         }
       } else {

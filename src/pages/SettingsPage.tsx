@@ -7,6 +7,7 @@ import { useTelegramStore } from "../store/telegram"
 import { useMT5Store } from "../store/mt5"
 import { useSettingsStore } from "../store/settings"
 import { logger } from "../core/logger"
+import { DEFAULT_MAX_SIGNAL_AGE_SECONDS } from "../core/constants"
 import type { TelegramChannelInfo } from "../core/telegram/types"
 
 const ChannelAvatar = ({ channelId = "", title = "?", size = 'sm', isActive = true }: { channelId?: string, title?: string, size?: 'sm' | 'lg', isActive?: boolean }) => {
@@ -623,6 +624,12 @@ export function SettingsPage() {
                         <input type="checkbox" checked={generalSettings.autoStartBridge} onChange={(e) => setGeneralSettings({ autoStartBridge: e.target.checked })} className="w-4 h-4 text-accent border-border rounded focus:ring-accent" />
                         <span className="text-sm font-medium">Auto-start Python Bridge on Launch</span>
                       </label>
+                    </div>
+
+                    <div className="pt-4 border-t border-border">
+                      <label className="block text-sm font-medium mb-1">Max Signal Age (seconds)</label>
+                      <input type="number" min="10" step="10" value={executionSettings.maxSignalAgeSeconds ?? DEFAULT_MAX_SIGNAL_AGE_SECONDS} onChange={(e) => setExecutionSettings({ maxSignalAgeSeconds: Math.max(10, Math.round(Number(e.target.value) || DEFAULT_MAX_SIGNAL_AGE_SECONDS)) })} className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                      <p className="text-xs text-secondary mt-1">Signals older than this are rejected instead of executed at today's price (e.g. after a reconnect).</p>
                     </div>
 
                     <div className="pt-4 border-t border-border">

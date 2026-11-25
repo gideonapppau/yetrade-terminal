@@ -18,7 +18,9 @@ import {
 import { ExecutionEngine } from '../execution-engine';
 import type { ParsedSignal } from '../signal-engine/types';
 import type { OpenPosition } from '../execution-engine/types';
-import { pipsToPoints } from '../../lib/utils';
+import type { AccountState } from '../risk-engine/types';
+import { pipsToPoints, floorToStep } from '../../lib/utils';
+import { DEFAULT_MAX_SIGNAL_AGE_SECONDS } from '../constants';
 import { toast } from 'sonner';
 import { playPop, playSuccess, playError } from '../../lib/sounds';
 
@@ -39,6 +41,87 @@ interface ExecuteOptions {
 
 type SignalRow = typeof signals.$inferSelect;
 
+type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+
+/**
+ * Live risk context: open groups and risk, floating drawdown, today's
+ * realized loss and (with a channel) that channel's executed count today.
+ * Shared by the automated pipeline and manual executions so neither can
+ * bypass the account limits.
+ */
+export async function buildAccountState(
+  db: Db,
+  opts: { channelId: string | null; riskPercent: number; maxTradesPerDay?: number }
+): Promise<AccountState> {
+  const settings = useSettingsStore.getState();
+  const mt5 = useMT5Store.getState();
+
+  // Open positions count toward the group cap and the open-risk budget
+  const openTrades = await db.select().from(trades).where(eq(trades.status, 'OPEN'));
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  // Executed signals from THIS channel today (for per-channel daily caps)
+  const channelTodaySignals = opts.channelId
+    ? await db
+        .select()
+        .from(signals)
+        .where(
+          and(
+            eq(signals.channelId, opts.channelId),
+            eq(signals.status, 'EXECUTED'),
+            gte(signals.receivedAt, startOfDay.getTime())
+          )
+        )
+    : [];
+
+  // Prefer live broker balance when available; fall back to configured balance
+  const effectiveBalance =
+    mt5.isConnected && mt5.balance > 0 ? mt5.balance : settings.accountBalance;
+  const effectiveEquity =
+    mt5.isConnected && mt5.equity > 0 ? mt5.equity : effectiveBalance;
+
+  // Daily loss budget consumption = NET realized P&L of trades closed
+  // today (winners offset losers), as % of the balance. Counting every
+  // executed signal as a full risk-unit loss would burn the whole day's
+  // budget after a few attempts regardless of actual results.
+  const closedTrades = await db
+    .select()
+    .from(trades)
+    .where(or(eq(trades.status, 'CLOSED_WIN'), eq(trades.status, 'CLOSED_LOSS')));
+
+  // A signal split across TP legs is ONE group - count signals, not legs
+  const openGroupsCount = countOpenGroups(openTrades);
+
+  return {
+    balance: effectiveBalance,
+    equity: effectiveEquity,
+    freeMargin: effectiveBalance,
+    openGroupsCount,
+    // Each open group commits roughly one unit of configured risk
+    openRiskPercent: openGroupsCount * opts.riskPercent,
+    // Floating drawdown from live equity so the max-drawdown rule
+    // actually fires instead of being permanently hardcoded to zero.
+    currentDrawdown: computeFloatingDrawdownPercent(effectiveBalance, effectiveEquity),
+    dailyLoss: computeDailyLossPercent(closedTrades, startOfDay.getTime(), effectiveBalance),
+    maxTradesPerDay: opts.maxTradesPerDay,
+    tradesExecutedToday: channelTodaySignals.length,
+  };
+}
+
+/** Open trade groups: legs sharing a signal count once; orphans count alone. */
+export function countOpenGroups(openTrades: Array<{ id: string; signalId: string | null }>): number {
+  return new Set(openTrades.map((t) => t.signalId ?? `trade:${t.id}`)).size;
+}
+
+/**
+ * Effective risk % for a channel: a positive override wins, otherwise the
+ * global setting applies unchanged (no minimum floor).
+ */
+export function resolveRiskPercent(override: number | null | undefined, globalPercent: number): number {
+  return override != null && override > 0 ? override : globalPercent;
+}
+
 export class TelegramService {
   private adapter: TelegramAdapter;
   private parser: RegexParser;
@@ -51,6 +134,12 @@ export class TelegramService {
     this.riskEngine = new RiskEngine();
     // Reuse the shared broker adapter so bridge URL updates apply here too
     this.executionEngine = new ExecutionEngine(useMT5Store.getState().adapter);
+    this.executionEngine.onUntrackedPositions = (tickets, request) => {
+      toast.error(`${request.signal.symbol}: position not recorded`, {
+        description: `Ticket(s) ${tickets.join(', ')} are open at the broker but untracked - manage them in MT5.`,
+        duration: Infinity,
+      });
+    };
   }
 
   /**
@@ -72,7 +161,12 @@ export class TelegramService {
     try {
       const channelIds = await this.loadActiveChannels();
       if (channelIds.length === 0) {
-        logger.info('No active channels to listen to.');
+        // Must be loud: a silent return here means no signal is ever processed
+        logger.warn('No active channels to listen to.');
+        toast.warning('Not listening to any channels', {
+          description: 'No active channels are saved in this app. Add them under Settings → Channels.',
+          duration: Infinity,
+        });
         return;
       }
 
@@ -81,8 +175,12 @@ export class TelegramService {
         this.handleNewMessage.bind(this),
         this.handleEditedMessage.bind(this)
       );
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ err }, 'Failed to start Telegram listener');
+      toast.error('Telegram listener failed to start', {
+        description: err?.message || String(err),
+        duration: Infinity,
+      });
     }
   }
 
@@ -288,25 +386,32 @@ export class TelegramService {
     const paused = settings.tradingPaused;
     let rejectReason: string | undefined;
 
+    // Hard blocks evaluated before any broker or risk work: the kill-switch,
+    // then signal staleness (e.g. redelivery after a reconnect).
+    const maxAgeSeconds =
+      settings.executionSettings.maxSignalAgeSeconds ?? DEFAULT_MAX_SIGNAL_AGE_SECONDS;
+    const ageSeconds = Math.round((Date.now() - rawMessage.timestamp.getTime()) / 1000);
+    const blockReason = paused
+      ? 'Trading paused via kill-switch'
+      : ageSeconds > maxAgeSeconds
+        ? `Signal is ${ageSeconds}s old (max ${maxAgeSeconds}s)`
+        : undefined;
+
     // Channel-level overrides fall back to the global risk configuration.
-    // Overrides below 1 (or negative) are treated as corrupt legacy data
-    // and ignored rather than honored. The global config itself is also
-    // floored at 1 - persisted settings may predate input validation.
+    // Values are honored exactly as configured - never raised to a floor,
+    // which would silently risk more than the user chose. Non-positive
+    // overrides count as "unset"; a non-positive global value makes the
+    // risk engine reject the signal.
     const channelRows = await db.select().from(telegramChannels).where(eq(telegramChannels.channelId, channelId));
     const channelRow = channelRows[0] as ChannelSignalRow | undefined;
     const overrideRisk = channelRow?.riskPerTrade;
     const overrideCap = channelRow?.maxTradesPerDay;
     const safeGlobalRisk = {
       ...settings.riskConfig,
-      riskPerTradePercent: Math.max(1, settings.riskConfig.riskPerTradePercent),
-      maxDailyLossPercent: Math.max(1, settings.riskConfig.maxDailyLossPercent),
-      maxOpenRiskPercent: Math.max(1, settings.riskConfig.maxOpenRiskPercent),
+      // MT5 treats a deviation of 0 as "no slippage allowed at all"
       maxSlippagePoints: Math.max(1, Math.round(settings.riskConfig.maxSlippagePoints)),
     };
-    const effectiveRiskPercent =
-      overrideRisk != null && overrideRisk >= 1
-        ? overrideRisk
-        : safeGlobalRisk.riskPerTradePercent;
+    const effectiveRiskPercent = resolveRiskPercent(overrideRisk, safeGlobalRisk.riskPerTradePercent);
     const effectiveMaxTradesPerDay =
       overrideCap != null && overrideCap >= 1 ? overrideCap : undefined;
     const effectiveRiskConfig: typeof settings.riskConfig = {
@@ -318,76 +423,36 @@ export class TelegramService {
     // armed to manage its exit; the risk engine enforces this policy.
     effectiveRiskConfig.trailingStopManagedTps = settings.executionSettings.trailingStopEnabled;
 
-    // Open positions count toward the group cap and the open-risk budget
-    const openTrades = await db.select().from(trades).where(eq(trades.status, 'OPEN'));
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-
-    // Executed signals from THIS channel today (for per-channel daily caps)
-    const channelTodaySignals = await db
-      .select()
-      .from(signals)
-      .where(
-        and(
-          eq(signals.channelId, channelId),
-          eq(signals.status, 'EXECUTED'),
-          gte(signals.receivedAt, startOfDay.getTime())
-        )
-      );
-
-    // Prefer live broker balance when available; fall back to configured balance
-    const effectiveBalance =
-      mt5.isConnected && mt5.balance > 0 ? mt5.balance : settings.accountBalance;
-    const effectiveEquity =
-      mt5.isConnected && mt5.equity > 0 ? mt5.equity : effectiveBalance;
-
-    // Daily loss budget consumption = NET realized P&L of trades closed
-    // today (winners offset losers), as % of the balance. Counting every
-    // executed signal as a full risk-unit loss would burn the whole day's
-    // budget after a few attempts regardless of actual results.
-    const closedTradesToday = await db
-      .select()
-      .from(trades)
-      .where(or(eq(trades.status, 'CLOSED_WIN'), eq(trades.status, 'CLOSED_LOSS')));
-
-    const account = {
-      balance: effectiveBalance,
-      equity: effectiveEquity,
-      freeMargin: effectiveBalance,
-      openGroupsCount: openTrades.length,
-      // Each open group commits roughly one unit of configured risk
-      openRiskPercent: openTrades.length * effectiveRiskPercent,
-      // Floating drawdown from live equity so the max-drawdown rule
-      // actually fires instead of being permanently hardcoded to zero.
-      currentDrawdown: computeFloatingDrawdownPercent(effectiveBalance, effectiveEquity),
-      dailyLoss: computeDailyLossPercent(closedTradesToday, startOfDay.getTime(), effectiveBalance),
+    const account = await buildAccountState(db, {
+      channelId,
+      riskPercent: effectiveRiskPercent,
       maxTradesPerDay: effectiveMaxTradesPerDay,
-      tradesExecutedToday: channelTodaySignals.length,
-    };
+    });
 
     let symbolInfo = undefined;
-    if (mt5.isConnected && !paused) {
+    if (mt5.isConnected && !blockReason) {
       const info = await mt5.adapter.getSymbolInfo(parsed.symbol);
       if (info) {
         symbolInfo = {
           trade_tick_value: info.trade_tick_value,
           trade_tick_size: info.trade_tick_size,
+          trade_contract_size: info.trade_contract_size,
           volume_min: info.volume_min,
           volume_step: info.volume_step,
         };
       }
     }
 
-    const riskEvaluation = paused ? null : this.riskEngine.evaluate(parsed, account, effectiveRiskConfig, symbolInfo);
+    const riskEvaluation = blockReason ? null : this.riskEngine.evaluate(parsed, account, effectiveRiskConfig, symbolInfo);
     let executed = false;
     // Respect the user's "Sound Alerts" preference for every signal sound
     const playSound = (fn: () => void) => {
       if (settings.generalSettings.soundAlerts) fn();
     };
 
-    if (paused) {
-      // Global kill-switch is active - never route anything to a broker
-      rejectReason = 'Trading paused via kill-switch';
+    if (blockReason) {
+      // Kill-switch or stale signal - never route anything to a broker
+      rejectReason = blockReason;
       playSound(playError);
       toast.warning(`Trade Skipped: ${parsed.symbol}`, {
         description: rejectReason,
@@ -635,7 +700,12 @@ export class TelegramService {
       return;
     }
 
-    const positions = mt5.adapter.getOpenPositions ? await mt5.adapter.getOpenPositions() : [];
+    const positions = mt5.adapter.getOpenPositions ? await mt5.adapter.getOpenPositions() : null;
+    if (!positions) {
+      // Unknown broker state must not be read as "legs are gone" - stay armed
+      logger.warn({ signalId: signal.id }, 'Cannot amend - open positions unavailable');
+      return;
+    }
     const price = mt5.adapter.getSymbolPrice ? await mt5.adapter.getSymbolPrice(signal.symbol) : null;
     const info = mt5.adapter.getSymbolInfo ? await mt5.adapter.getSymbolInfo(signal.symbol) : null;
 
@@ -692,10 +762,7 @@ export class TelegramService {
       .from(telegramChannels)
       .where(eq(telegramChannels.channelId, signal.channelId));
     const overrideRisk = (channelRows[0] as ChannelSignalRow | undefined)?.riskPerTrade;
-    const riskPercent =
-      overrideRisk != null && overrideRisk >= 1
-        ? overrideRisk
-        : Math.max(1, settings.riskConfig.riskPerTradePercent);
+    const riskPercent = resolveRiskPercent(overrideRisk, settings.riskConfig.riskPerTradePercent);
 
     // Conservative aggregate: the widest leg distance drives the resize math
     const currentTotalVolume = activeLegs.reduce((sum, l) => sum + l.pos.volume, 0);
@@ -718,9 +785,12 @@ export class TelegramService {
     const volStep = info?.volume_step && info.volume_step > 0 ? info.volume_step : 0.01;
     const volMin = info?.volume_min && info.volume_min > 0 ? info.volume_min : 0.01;
     const stepDecimals = (String(volStep).split('.')[1] || '').length;
-    const roundToStep = (v: number) =>
-      Number((Math.floor(v / volStep) * volStep).toFixed(stepDecimals));
+    const roundToStep = (v: number) => floorToStep(v, volStep);
 
+    // Every broker call is checked. A leg whose resize failed keeps its
+    // tighter provisional stop - widening it at full size would break the
+    // risk budget.
+    const failures: string[] = [];
     let resized = false;
     for (const { leg, pos } of activeLegs) {
       const tpForLeg = adoptedTp ?? pos.tp ?? undefined;
@@ -729,23 +799,44 @@ export class TelegramService {
         const desiredVolume = roundToStep(pos.volume * plan.scale);
         if (desiredVolume < volMin) {
           // Leg too small to survive the resize - close it completely
-          if (mt5.adapter.closeTrade) await mt5.adapter.closeTrade(pos.ticket);
-          resized = true;
+          const res = mt5.adapter.closeTrade
+            ? await mt5.adapter.closeTrade(pos.ticket)
+            : { success: false, message: 'Broker cannot close positions' };
+          if (res.success) {
+            resized = true;
+          } else {
+            failures.push(`close #${pos.ticket}: ${res.message}`);
+          }
           continue;
         }
         if (desiredVolume < pos.volume - volStep / 2) {
           // Partial close restores the original risk budget
-          if (mt5.adapter.closeTrade) {
-            await mt5.adapter.closeTrade(pos.ticket, Number((pos.volume - desiredVolume).toFixed(stepDecimals)));
+          const res = mt5.adapter.closeTrade
+            ? await mt5.adapter.closeTrade(pos.ticket, Number((pos.volume - desiredVolume).toFixed(stepDecimals)))
+            : { success: false, message: 'Broker cannot close positions' };
+          if (!res.success) {
+            failures.push(`trim #${pos.ticket}: ${res.message}`);
+            continue;
           }
           await db.update(trades).set({ volume: desiredVolume }).where(eq(trades.id, leg.id));
           resized = true;
         }
       }
 
-      if (mt5.adapter.modifyTrade) {
-        await mt5.adapter.modifyTrade(pos.ticket, newSl, tpForLeg);
-      }
+      const res = mt5.adapter.modifyTrade
+        ? await mt5.adapter.modifyTrade(pos.ticket, newSl, tpForLeg)
+        : { success: false, message: 'Broker cannot modify positions' };
+      if (!res.success) failures.push(`modify #${pos.ticket}: ${res.message}`);
+    }
+
+    if (failures.length > 0) {
+      // Stay armed: the expiry policy (or a corrected edit) still applies
+      logger.error({ signalId: signal.id, failures }, 'Provisional amendment partially failed');
+      toast.error(`${signal.symbol}: adjustment incomplete`, {
+        description: `Broker refused: ${failures.join('; ')}. Provisional levels stay in charge.`,
+      });
+      window.dispatchEvent(new Event('mock_trade_closed'));
+      return;
     }
 
     // Amendment consumed - later edits are recorded but never applied

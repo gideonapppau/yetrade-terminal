@@ -3,23 +3,86 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
 import atexit
+import hashlib
+import hmac
+import os
 import threading
 import time
 
 app = Flask(__name__)
-CORS(app)  # Allow requests from Tauri
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- Access control ----------------------------------------------------------
+# The bridge can place and close live trades, so it must never be reachable
+# from arbitrary web pages the user happens to visit:
+#  - CORS only admits the Tauri webview (and the Vite dev server),
+#  - the Host header must be loopback, which defeats DNS-rebinding attacks,
+#  - when launched by the app, every request must carry the per-launch token.
+BRIDGE_PORT = int(os.environ.get("BRIDGE_PORT", "8000"))
+BRIDGE_TOKEN = os.environ.get("BRIDGE_TOKEN") or None
+ALLOWED_ORIGINS = [
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+ALLOWED_HOSTS = {f"127.0.0.1:{BRIDGE_PORT}", f"localhost:{BRIDGE_PORT}"}
+
+CORS(app, origins=ALLOWED_ORIGINS)
+
+if BRIDGE_TOKEN is None:
+    logger.warning("BRIDGE_TOKEN not set - requests are not token-authenticated (dev mode)")
+
+
+@app.before_request
+def enforce_access_control():
+    if request.host not in ALLOWED_HOSTS:
+        return jsonify({"success": False, "message": "Forbidden host"}), 403
+    # CORS preflights carry no custom headers; flask_cors answers them.
+    if request.method == "OPTIONS":
+        return None
+    if BRIDGE_TOKEN is not None:
+        supplied = request.headers.get("X-Bridge-Token", "")
+        if not hmac.compare_digest(supplied, BRIDGE_TOKEN):
+            return jsonify({"success": False, "message": "Unauthorized"}), 401
+    return None
+
 # --- Execution idempotency -------------------------------------------------
 # Clients key each order leg (signalId#splitIndex). If a request times out and
-# is retried, the cached result is replayed instead of opening a duplicate
-# position. In-memory only: it protects against transport-level retries while
-# this bridge process is alive.
+# is retried, the original result is replayed instead of opening a duplicate
+# position. Two layers:
+#  - an in-memory cache (fast path while this process lives),
+#  - the order comment carries a hash of the key, so after a bridge restart
+#    the broker's own positions/deals still reveal an earlier fill.
+# Requests are served one at a time (threaded=False below), so check-then-send
+# cannot race with a concurrent retry.
 _exec_lock = threading.Lock()
 _exec_results = {}
 EXEC_CACHE_MAX_ENTRIES = 500
+# Deal history searched for a tagged fill after a restart
+IDEMPOTENCY_LOOKBACK_SECONDS = 2 * 24 * 3600
+
+
+def _order_tag(key):
+    """MT5 comments hold ~31 chars, so the key is hashed into a short tag."""
+    return "ACE:" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _find_tagged_fill(tag):
+    """Result payload of an earlier fill carrying `tag`, or None."""
+    for p in mt5.positions_get() or []:
+        if getattr(p, "comment", "") == tag:
+            return {"success": True, "ticket": p.ticket, "price": float(p.price_open),
+                    "volume": float(p.volume), "message": "Order already executed (recovered)"}
+    now = int(time.time())
+    for d in mt5.history_deals_get(now - IDEMPOTENCY_LOOKBACK_SECONDS, now + 60) or []:
+        if getattr(d, "comment", "") == tag and d.entry == mt5.DEAL_ENTRY_IN:
+            return {"success": True, "ticket": d.position_id, "price": float(d.price),
+                    "volume": float(d.volume), "message": "Order already executed (recovered)"}
+    return None
 
 
 def _exec_cache_get(key):
@@ -62,15 +125,20 @@ def login_broker():
     else:
         logger.info("No custom path provided. Using default MT5 installation path.")
 
+    try:
+        login_num = int(login_id) if login_id else None
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "Login must be a number"}), 400
+
     # Pass credentials directly to initialize to prevent UAC or IPC prompt blocks
-    if login_id:
-        init_kwargs["login"] = int(login_id)
+    if login_num:
+        init_kwargs["login"] = login_num
     if password:
         init_kwargs["password"] = password
     if server:
         init_kwargs["server"] = server
 
-    logger.info(f"Calling mt5.initialize(kwargs={init_kwargs})")
+    logger.info(f"Calling mt5.initialize(keys={sorted(k for k in init_kwargs if k != 'password')})")
     
     # Attempt to initialize with specific path if provided
     init_result = mt5.initialize(**init_kwargs)
@@ -96,7 +164,7 @@ def login_broker():
     
     if login_id and password and server:
         logger.info(f"Authenticating with broker: {server}")
-        authorized = mt5.login(int(login_id), password=password, server=server)
+        authorized = mt5.login(login_num, password=password, server=server)
         if not authorized:
             logger.error(f"mt5.login() failed. last_error: {mt5.last_error()}")
             return jsonify({"success": False, "message": f"Login failed: {mt5.last_error()}"}), 401
@@ -159,7 +227,8 @@ def get_deals():
 
     deals = mt5.history_deals_get(position=int(position))
     if deals is None:
-        return jsonify({"success": True, "deals": []})
+        # A failed query is not "no deals" - callers decide closures from this
+        return jsonify({"success": False, "message": f"Failed to get deals: {mt5.last_error()}"}), 500
 
     deal_list = []
     for d in deals:
@@ -247,6 +316,28 @@ def _get_fresh_tick(symbol, retries=4, delay=0.25):
     return tick
 
 
+def _filling_modes(symbol_info):
+    """The broker's supported filling policies, most preferred first."""
+    supported = int(getattr(symbol_info, "filling_mode", 0) or 0)
+    fillings = []
+    if supported & 2:
+        fillings.append(mt5.ORDER_FILLING_IOC)
+    if supported & 1:
+        fillings.append(mt5.ORDER_FILLING_FOK)
+    fillings.append(mt5.ORDER_FILLING_RETURN)
+    return fillings
+
+
+def _retryable_retcodes():
+    """Retcodes worth retrying with the next filling mode / a fresh price."""
+    return {
+        getattr(mt5, "TRADE_RETCODE_INVALID_FILL", 10030),
+        getattr(mt5, "TRADE_RETCODE_REQUOTE", 10004),
+        getattr(mt5, "TRADE_RETCODE_PRICE_OFF", 10021),
+        getattr(mt5, "TRADE_RETCODE_TIMEOUT", 10012),
+    }
+
+
 @app.route("/trade/execute", methods=["POST"])
 def execute_trade():
     """Market execution anchored to the CURRENT broker price.
@@ -266,6 +357,15 @@ def execute_trade():
         if cached is not None:
             logger.info(f"Idempotent replay for {idempotency_key} - returning cached result")
             return jsonify(cached)
+
+    order_tag = _order_tag(idempotency_key) if idempotency_key else "ACE Terminal"
+    if idempotency_key:
+        # Cache misses after a bridge restart: the broker still knows the fill
+        recovered = _find_tagged_fill(order_tag)
+        if recovered is not None:
+            logger.info(f"Idempotent replay for {idempotency_key} - recovered fill #{recovered['ticket']} from broker")
+            _exec_cache_put(idempotency_key, recovered)
+            return jsonify(recovered)
 
     symbol = trade.get("symbol")
     action = trade.get("action")
@@ -302,10 +402,8 @@ def execute_trade():
     point = symbol_info.point or 0.0
     digits = int(getattr(symbol_info, "digits", 5) or 5)
 
-    # Slippage tolerance must scale with the instrument: a fixed point count
-    # that suits FX is mere cents on crypto and gets rejected as requotes.
-    if point > 0:
-        deviation = max(deviation, int((ref * 0.001) / point))
+    # Slippage tolerance is the user's configured deviation, honored as-is.
+    # (Crypto symbols with tiny points may need a larger setting.)
 
     # --- Re-anchor stops around the live market ---------------------------
     stops_points = getattr(symbol_info, "trade_stops_level", 0) or 0
@@ -316,38 +414,49 @@ def execute_trade():
         entry_val = float(entry) if entry else 0.0
     except (TypeError, ValueError):
         entry_val = 0.0
+    sl_val = float(sl) if sl else None
+    # Distance the client sized the position for; re-anchoring preserves it
+    sized_stop_dist = abs(entry_val - sl_val) if entry_val > 0 and sl_val else 0.0
+
+    if entry_val > 0 and sl_val:
+        if (is_buy and sl_val >= entry_val) or (not is_buy and sl_val <= entry_val):
+            msg = f"Stop loss {sl_val} is on the wrong side of entry {entry_val} for a {action.upper()}"
+            logger.error(msg)
+            return jsonify({"success": False, "message": msg}), 400
+
     if entry_val > 0:
         shift = entry_val - ref
+        # Re-anchoring keeps the provider's distances, but only while the
+        # market is still near the posted entry: chasing a move that already
+        # ran a large share of the stop is a different trade.
+        max_drift_r = float(trade.get("maxEntryDriftR", 0.5))
+        if sized_stop_dist > 0 and abs(shift) > max_drift_r * sized_stop_dist:
+            msg = (f"Price moved too far from entry: live {ref} vs posted {entry_val} "
+                   f"({abs(shift) / sized_stop_dist:.2f}R > {max_drift_r}R)")
+            logger.error(msg)
+            return jsonify({"success": False, "message": msg}), 409
         logger.info(f"Re-anchoring {symbol}: posted entry {entry_val} vs live {ref} (shift {-shift:.5f})")
 
-    adj_sl = float(sl) - shift if sl else None
+    adj_sl = sl_val - shift if sl_val else None
     adj_tp = float(tp) - shift if tp else None
 
     if adj_sl is not None:
         # BUY SL must sit below the bid; SELL SL above the ask
         adj_sl = min(adj_sl, bid - min_dist) if is_buy else max(adj_sl, ask + min_dist)
+        # The clamp may only tighten risk - never widen past what was sized
+        if sized_stop_dist > 0 and abs(ref - adj_sl) > sized_stop_dist + point:
+            msg = (f"Broker minimum stop distance forces a wider stop than sized "
+                   f"({abs(ref - adj_sl):.5f} > {sized_stop_dist:.5f})")
+            logger.error(msg)
+            return jsonify({"success": False, "message": msg}), 400
     if adj_tp is not None:
         # BUY TP must sit above the ask; SELL TP below the bid
         adj_tp = max(adj_tp, ask + min_dist) if is_buy else min(adj_tp, bid - min_dist)
 
-    # Respect the broker's supported filling policies instead of hardcoding IOC
-    supported = int(getattr(symbol_info, "filling_mode", 0) or 0)
-    fillings = []
-    if supported & 2:
-        fillings.append(mt5.ORDER_FILLING_IOC)
-    if supported & 1:
-        fillings.append(mt5.ORDER_FILLING_FOK)
-    fillings.append(mt5.ORDER_FILLING_RETURN)
-
-    retryable_retcode = {
-        getattr(mt5, "TRADE_RETCODE_INVALID_FILL", 10030),
-        getattr(mt5, "TRADE_RETCODE_REQUOTE", 10004),
-        getattr(mt5, "TRADE_RETCODE_PRICE_OFF", 10021),
-        getattr(mt5, "TRADE_RETCODE_TIMEOUT", 10012),
-    }
+    retryable_retcode = _retryable_retcodes()
 
     last_msg = "Order failed"
-    for mode in fillings:
+    for mode in _filling_modes(symbol_info):
         fresh = _get_fresh_tick(symbol, retries=2, delay=0.2)
         if fresh is None:
             break
@@ -363,7 +472,7 @@ def execute_trade():
             "price": round(exec_price, digits),
             "deviation": deviation,
             "magic": magic,
-            "comment": "ACE Terminal",
+            "comment": order_tag,
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mode,
         }
@@ -403,7 +512,10 @@ def close_trade():
     if not data or "ticket" not in data:
         return jsonify({"success": False, "message": "Missing ticket"}), 400
 
-    ticket = int(data["ticket"])
+    try:
+        ticket = int(data["ticket"])
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "Invalid ticket"}), 400
     position = mt5.positions_get(ticket=ticket)
     if not position or len(position) == 0:
         return jsonify({"success": False, "message": "Position not found"}), 404
@@ -411,46 +523,62 @@ def close_trade():
     pos = position[0]
     symbol = pos.symbol
     lot = pos.volume
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        return jsonify({"success": False, "message": f"Failed to get info for {symbol}"}), 503
 
-    # Optional partial close: clamp to a valid broker volume range
+    # Optional partial close: snap DOWN to the broker's volume step. If the
+    # remainder would fall below the minimum lot, close fully (less risk,
+    # never more).
     requested_volume = data.get("volume")
     if requested_volume is not None:
-        info = mt5.symbol_info(symbol)
         vol_min = float(getattr(info, "volume_min", 0.01) or 0.01)
+        vol_step = float(getattr(info, "volume_step", 0.01) or 0.01)
         try:
             requested_volume = float(requested_volume)
         except (TypeError, ValueError):
             return jsonify({"success": False, "message": "Invalid volume"}), 400
-        if requested_volume >= pos.volume:
-            lot = pos.volume  # rounds up to a full close
-        elif requested_volume < vol_min:
+        step_decimals = len(repr(vol_step).split(".")[1]) if "." in repr(vol_step) else 0
+        stepped = round(int(requested_volume / vol_step + 1e-9) * vol_step, step_decimals)
+        if stepped < vol_min:
             return jsonify({"success": False, "message": f"Partial volume below broker minimum ({vol_min})"}), 400
+        if stepped >= pos.volume or pos.volume - stepped < vol_min - 1e-9:
+            lot = pos.volume
         else:
-            lot = requested_volume
+            lot = stepped
 
     order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
-    price = mt5.symbol_info_tick(symbol).bid if order_type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
+    last_msg = "Close failed"
+    for mode in _filling_modes(info):
+        tick = _get_fresh_tick(symbol, retries=2, delay=0.2)
+        if tick is None:
+            return jsonify({"success": False, "message": f"No live price for {symbol}"}), 503
+        req = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": lot,
+            "type": order_type,
+            "position": ticket,
+            "price": tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask,
+            "deviation": 20,
+            "magic": pos.magic,
+            "comment": "ACE Terminal Close",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mode,
+        }
+        result = mt5.order_send(req)
+        if result is None:
+            last_msg = f"order_send returned None: {mt5.last_error()}"
+            logger.error(last_msg)
+            continue
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            return jsonify({"success": True, "message": "Position closed successfully", "volume": lot})
+        last_msg = f"Close failed, retcode={result.retcode} ({getattr(result, 'comment', '')})"
+        logger.error(f"{last_msg} with filling={mode}")
+        if result.retcode not in _retryable_retcodes():
+            break
 
-    req = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": lot,
-        "type": order_type,
-        "position": ticket,
-        "price": price,
-        "deviation": 20,
-        "magic": pos.magic,
-        "comment": "ACE Terminal Close",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
-    }
-
-    result = mt5.order_send(req)
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
-        logger.error(f"Close failed, retcode={result.retcode}")
-        return jsonify({"success": False, "message": f"Close failed, retcode={result.retcode}"})
-
-    return jsonify({"success": True, "message": "Position closed successfully"})
+    return jsonify({"success": False, "message": last_msg})
 
 @app.route("/trade/modify", methods=["POST"])
 def modify_trade():
@@ -458,7 +586,12 @@ def modify_trade():
     if not data or "ticket" not in data:
         return jsonify({"success": False, "message": "Missing ticket"}), 400
 
-    ticket = int(data["ticket"])
+    try:
+        ticket = int(data["ticket"])
+        new_sl = float(data["sl"]) if data.get("sl") is not None else None
+        new_tp = float(data["tp"]) if data.get("tp") is not None else None
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "Invalid ticket or levels"}), 400
     position = mt5.positions_get(ticket=ticket)
     if not position or len(position) == 0:
         return jsonify({"success": False, "message": "Position not found"}), 404
@@ -468,11 +601,14 @@ def modify_trade():
         "action": mt5.TRADE_ACTION_SLTP,
         "symbol": pos.symbol,
         "position": ticket,
-        "sl": float(data["sl"]) if "sl" in data else pos.sl,
-        "tp": float(data["tp"]) if "tp" in data else pos.tp,
+        "sl": new_sl if new_sl is not None else pos.sl,
+        "tp": new_tp if new_tp is not None else pos.tp,
     }
 
     result = mt5.order_send(req)
+    if result is None:
+        logger.error(f"Modify failed: order_send returned None: {mt5.last_error()}")
+        return jsonify({"success": False, "message": f"Modify failed: {mt5.last_error()}"})
     if result.retcode != mt5.TRADE_RETCODE_DONE:
         logger.error(f"Modify failed, retcode={result.retcode}")
         return jsonify({"success": False, "message": f"Modify failed, retcode={result.retcode}"})
@@ -483,7 +619,9 @@ from simulator import simulate_trade, OrderType
 
 @app.route("/backtest", methods=["POST"])
 def backtest():
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "message": "Invalid request body"}), 400
     signals = data.get("signals", [])
     config = data.get("config", {
         "maxDurationSeconds": 14 * 24 * 3600,
@@ -548,4 +686,6 @@ def backtest():
     return jsonify({"success": True, "results": results})
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8000, debug=True, use_reloader=False)
+    # threaded=False: the MetaTrader5 package is not thread-safe, and serial
+    # handling also makes the idempotency check-then-send race-free.
+    app.run(host="127.0.0.1", port=BRIDGE_PORT, debug=False, use_reloader=False, threaded=False)

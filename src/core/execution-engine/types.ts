@@ -61,7 +61,8 @@ export interface BrokerAdapter {
   loginBroker(params: any): Promise<{ success: boolean; message: string }>;
   executeTrade(request: ExecutionRequest): Promise<ExecutionResult>;
   getAccountInfo(): Promise<any>;
-  getOpenPositions?(): Promise<OpenPosition[]>;
+  /** null when the broker could not be queried - never confuse with "no positions". */
+  getOpenPositions?(): Promise<OpenPosition[] | null>;
   getSymbolPrice?(symbol: string): Promise<{ ask: number; bid: number } | null>;
   getSymbolInfo?(symbol: string): Promise<SymbolInfo | null>;
   /** Closed-deal history for a position; null/[] when the broker has none yet. */

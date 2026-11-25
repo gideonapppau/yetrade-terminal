@@ -46,12 +46,31 @@ describe('RiskEngine.evaluate - approvals', () => {
     expect(result.rr).toBeCloseTo(2.0, 6);
   });
 
-  it('falls back to the mock tick value when no broker info is provided', () => {
+  it('rejects instead of guessing a size when no broker info is provided', () => {
     const result = engine.evaluate(signal, account, config);
 
+    expect(result.decision).toBe('REJECTED');
+    expect(result.positionSize).toBeNull();
+    expect(result.ruleResults.find((r) => r.ruleName === 'Position Sizing')?.passed).toBe(false);
+  });
+
+  it('sizes from contract size when the broker reports no tick value', () => {
+    const result = engine.evaluate(signal, account, config, {
+      trade_tick_value: 0,
+      trade_tick_size: 0,
+      trade_contract_size: 100000,
+    });
+
     expect(result.decision).toBe('APPROVED');
-    expect(result.positionSize).not.toBeNull();
-    expect(result.positionSize).toBeGreaterThan(0);
+    // $100 risk / (0.005 stop * 100000) = 0.2 lots
+    expect(result.positionSize).toBeCloseTo(0.2, 6);
+  });
+
+  it('rejects a non-positive risk per trade', () => {
+    const result = engine.evaluate(signal, account, { ...config, riskPerTradePercent: 0 }, symbolInfo);
+
+    expect(result.decision).toBe('REJECTED');
+    expect(result.ruleResults.find((r) => r.ruleName === 'Risk Configuration')?.passed).toBe(false);
   });
 
   it('never sizes below the minimum lot size', () => {
@@ -251,5 +270,42 @@ describe('RiskEngine.evaluate - minimum volume policy', () => {
 
     expect(result.decision).toBe('APPROVED');
     expect(result.positionSize).toBeCloseTo(0.2, 6);
+  });
+});
+
+describe('RiskEngine.evaluate - level sanity and size ceiling', () => {
+  it('rejects a BUY whose stop sits above entry', () => {
+    const result = engine.evaluate({ ...signal, stopLoss: 1.09 }, account, config, symbolInfo);
+    expect(result.decision).toBe('REJECTED');
+    expect(result.ruleResults.find((r) => r.ruleName === 'Stop Loss Side')?.passed).toBe(false);
+  });
+
+  it('rejects a SELL whose target sits above entry', () => {
+    const sell = { ...signal, direction: 'SELL' as const, stopLoss: 1.09, takeProfits: [{ price: 1.095 }] };
+    const result = engine.evaluate(sell, account, config, symbolInfo);
+    expect(result.decision).toBe('REJECTED');
+    expect(result.ruleResults.find((r) => r.ruleName === 'Take Profit Side')?.passed).toBe(false);
+  });
+
+  it('rejects sizes above the lot ceiling instead of trading them', () => {
+    // 2-point stop -> $100 / (0.00002 / 0.00001 * $1) = 50 lots
+    const tight = { ...signal, stopLoss: 1.08498, takeProfits: [{ price: 1.0851 }] };
+    const result = engine.evaluate(tight, account, { ...config, maxPositionSizeLots: 5 }, symbolInfo);
+    expect(result.decision).toBe('REJECTED');
+    expect(result.positionSize).toBeNull();
+    expect(result.ruleResults.find((r) => r.ruleName === 'Position Sizing')?.message).toMatch(/ceiling/);
+  });
+});
+
+describe('RiskEngine.evaluate - projected open risk', () => {
+  it('counts the new trade toward the open-risk cap', () => {
+    // 3.5% open + 1% new = 4.5% > 4% max
+    const result = engine.evaluate(signal, { ...account, openGroupsCount: 1, openRiskPercent: 3.5 }, config, symbolInfo);
+    expect(result.ruleResults.find((r) => r.ruleName === 'Max Open Risk')?.passed).toBe(false);
+  });
+
+  it('allows a trade that lands exactly on the cap', () => {
+    const result = engine.evaluate(signal, { ...account, openGroupsCount: 1, openRiskPercent: 3 }, config, symbolInfo);
+    expect(result.ruleResults.find((r) => r.ruleName === 'Max Open Risk')?.passed).toBe(true);
   });
 });

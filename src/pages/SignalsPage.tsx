@@ -10,6 +10,9 @@ import { formatMoney } from "../lib/utils"
 import type { ParsedSignal } from "../core/signal-engine/types"
 import { RiskEngine } from "../core/risk-engine"
 import { ExecutionEngine } from "../core/execution-engine"
+import { MIN_POSITION_SIZE_LOTS } from "../core/constants"
+import { buildAccountState } from "../core/telegram/service"
+import { getDb } from "../db"
 
 const STATUS_FILTERS = ["All", "Approved", "Rejected", "Missed"] as const
 type StatusFilter = typeof STATUS_FILTERS[number]
@@ -65,20 +68,18 @@ export function SignalsPage() {
       takeProfits: signal.tp > 0 ? [{ price: signal.tp }] : [],
     };
 
-    let positionSize: number | null = null;
+    let positionSize: number;
     if (!override) {
-      // Re-run the risk engine so manual executions respect current limits
+      // Re-run the risk engine against the LIVE account state so manual
+      // executions respect open-risk, drawdown and daily-loss limits too
       const settings = useSettingsStore.getState();
-      const effectiveBalance =
-        mt5.balance > 0 ? mt5.balance : settings.accountBalance;
-      const evaluation = new RiskEngine().evaluate(parsed, {
-        balance: effectiveBalance,
-        equity: effectiveBalance,
-        freeMargin: effectiveBalance,
-        openGroupsCount: 0,
-        currentDrawdown: 0,
-        dailyLoss: 0,
-      }, settings.riskConfig);
+      const account = await buildAccountState(await getDb(), {
+        channelId: null,
+        riskPercent: settings.riskConfig.riskPerTradePercent,
+      });
+      // Real broker metadata is required for sizing; the engine rejects without it
+      const info = await mt5.adapter.getSymbolInfo(parsed.symbol);
+      const evaluation = new RiskEngine().evaluate(parsed, account, settings.riskConfig, info ?? undefined);
 
       if (evaluation.decision !== 'APPROVED' || evaluation.positionSize === null) {
         const reason = evaluation.ruleResults.find((r) => !r.passed)?.message || 'Unknown reason';
@@ -86,22 +87,26 @@ export function SignalsPage() {
         return;
       }
       positionSize = evaluation.positionSize;
+    } else {
+      // Override skips the risk checks but still trades the smallest size
+      // the broker accepts - stated explicitly, never implied by a 0.
+      const info = await mt5.adapter.getSymbolInfo(parsed.symbol);
+      positionSize = info?.volume_min && info.volume_min > 0 ? info.volume_min : MIN_POSITION_SIZE_LOTS;
     }
 
     setExecutingIds((prev) => [...prev, signal.id]);
     try {
-      // positionSize of 0 lets the broker adapter fall back to its minimum lot size
       const engine = new ExecutionEngine(mt5.adapter);
       const executed = await engine.executeApprovedSignal({
         signalId: signal.id,
         signal: parsed,
-        positionSize: positionSize ?? 0,
+        positionSize,
       });
 
       if (executed) {
         updateSignal(signal.id, { outcome: 'EXECUTED' });
         toast.success(`Trade Executed: ${parsed.symbol}`, {
-          description: `Size: ${positionSize ?? 'minimum'} lots`,
+          description: `Size: ${positionSize} lots`,
         });
       } else {
         toast.error(`Execution Failed: ${parsed.symbol}`, {

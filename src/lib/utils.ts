@@ -28,3 +28,14 @@ export function pipsToPoints(pips: number, point: number): number {
   const digits = Math.round(-Math.log10(point));
   return digits % 2 === 1 ? pips * 10 : pips;
 }
+
+/**
+ * Rounds a lot size DOWN to the broker's volume step, so rounding can never
+ * risk more than computed. The epsilon absorbs float error (0.29 / 0.01 is
+ * 28.999...) that would otherwise drop a whole step.
+ */
+export function floorToStep(value: number, step: number): number {
+  if (!(step > 0) || !Number.isFinite(value)) return value;
+  const decimals = (String(step).split('.')[1] || '').length;
+  return Number((Math.floor(value / step + 1e-9) * step).toFixed(decimals));
+}

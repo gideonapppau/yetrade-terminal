@@ -141,3 +141,61 @@ describe('RegexParser.parse', () => {
     expect(signal!.takeProfits.map((tp) => tp.price)).toEqual([80000, 83000]);
   });
 });
+
+describe('RegexParser.parse - dot separators', () => {
+  it('reads sub-100 prices after a bare TP label in full', () => {
+    const signal = parser.parse('EURUSD BUY\nENTRY: 1.0800\nSL 1.0750\nTP 1.0850');
+    expect(signal!.stopLoss).toBe(1.075);
+    expect(signal!.takeProfits.map((tp) => tp.price)).toEqual([1.085]);
+
+    const silver = parser.parse('XAGUSD SELL\nENTRY: 13.20\nSL 13.80\nTP 12.50');
+    expect(silver!.takeProfits.map((tp) => tp.price)).toEqual([12.5]);
+  });
+
+  it('accepts a dot after a numbered TP label when whitespace follows', () => {
+    const signal = parser.parse('XAUUSD BUY\nENTRY: 3350\nSL. 3340\nTP1. 3360\nTP2. 3380');
+    expect(signal!.stopLoss).toBe(3340);
+    expect(signal!.takeProfits.map((tp) => tp.price)).toEqual([3360, 3380]);
+  });
+
+  it('does not read a dot after SL as a decimal point', () => {
+    const signal = parser.parse('XAUUSD BUY\nENTRY: 3350\nSL.3340\nTP: 3360');
+    expect(signal!.stopLoss).toBe(3340);
+  });
+});
+
+describe('RegexParser.parse - order-type words and symbols', () => {
+  it('never takes an order-type word as the symbol', () => {
+    const limit = parser.parse('XAUUSD\nBUY LIMIT 3350\nSL 3340\nTP 3370');
+    expect(limit).toMatchObject({ symbol: 'XAUUSD', direction: 'BUY', entry: 3350, stopLoss: 3340 });
+
+    const now = parser.parse('SELL NOW XAUUSD 3350 SL 3360 TP 3330');
+    expect(now).toMatchObject({ symbol: 'XAUUSD', direction: 'SELL', entry: 3350 });
+
+    const limitWithSymbol = parser.parse('BUY LIMIT GOLD 3350\nSL 3340\nTP 3370');
+    expect(limitWithSymbol).toMatchObject({ symbol: 'GOLD', entry: 3350 });
+  });
+
+  it('never takes a level label as the symbol', () => {
+    const signal = parser.parse('XAUUSD SELL\nSTOP LOSS 3360\nTP 3330');
+    expect(signal).toMatchObject({ symbol: 'XAUUSD', direction: 'SELL', stopLoss: 3360 });
+  });
+
+  it('never takes a bare price as the symbol', () => {
+    const signal = parser.parse('XAUUSD BUY 3350\nSL 3340\nTP 3370');
+    expect(signal).toMatchObject({ symbol: 'XAUUSD', entry: 3350 });
+  });
+
+  it('reads entries without a colon', () => {
+    expect(parser.parse('XAUUSD BUY\nENTRY 3350\nSL 3340\nTP 3370')!.entry).toBe(3350);
+    expect(parser.parse('XAUUSD BUY\nENTRY @ 3350\nSL 3340\nTP 3370')!.entry).toBe(3350);
+  });
+});
+
+describe('RegexParser.parseIntent - order-type words', () => {
+  it('skips order-type words and digit-led tokens', () => {
+    expect(parser.parseIntent('SELL NOW GOLD')).toEqual({ symbol: 'GOLD', direction: 'SELL' });
+    expect(parser.parseIntent('SELL NOW')).toBeNull();
+    expect(parser.parseIntent('BUY 3350')).toBeNull();
+  });
+});

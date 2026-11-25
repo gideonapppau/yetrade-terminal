@@ -13,6 +13,7 @@ import { trades, signals as signalsSchema } from "./db/schema"
 import { eq, and, or } from "drizzle-orm"
 import { logger } from "./core/logger"
 import type { OpenPosition } from "./core/execution-engine/types"
+import { decideClosure } from "./core/execution-engine/reconcile"
 import { pipsToPoints } from "./lib/utils"
 
 type TradeRecord = typeof trades.$inferSelect
@@ -63,9 +64,17 @@ function App() {
     return () => window.removeEventListener('mock_trade_closed', loadDashboardTrades);
   }, [loadDashboardTrades]);
 
+  // Consecutive polls each open ticket has been missing from the broker
+  const missedPolls = useRef(new Map<string, number>())
+
   // Monitor trades and automate management (Breakeven/Trailing)
   useEffect(() => {
+    // A slow bridge can make one pass outlast the interval; overlapping
+    // passes would send duplicate close/modify requests for the same position.
+    let running = false;
     const interval = setInterval(async () => {
+      if (running) return;
+      running = true;
       try {
         const mt5 = useMT5Store.getState();
         if (!mt5.isConnected || !mt5.adapter || typeof mt5.adapter.getOpenPositions !== 'function') return;
@@ -93,10 +102,23 @@ function App() {
           const keep = useSettingsStore.getState().executionSettings.instantExpiryAction === 'KEEP';
           if (!keep) {
             const legs = openTradesInDb.filter((t) => t.signalId === sig.id);
+            let allClosed = true;
             for (const leg of legs) {
-              if (typeof mt5.adapter.closeTrade === 'function') {
-                await mt5.adapter.closeTrade(leg.id).catch(() => undefined);
+              const res = typeof mt5.adapter.closeTrade === 'function'
+                ? await mt5.adapter.closeTrade(leg.id).catch((e: unknown) => ({ success: false, message: String(e) }))
+                : { success: false, message: 'Broker cannot close positions' };
+              if (!res.success) {
+                allClosed = false;
+                logger.error({ signalId: sig.id, ticket: leg.id, message: res.message }, 'Expiry close failed');
               }
+            }
+            if (!allClosed) {
+              // Stay armed so the next tick retries the close
+              toast.error(`Instant entry ${sig.symbol}: close failed`, {
+                id: `instant-expired-${sig.id}`,
+                description: 'The broker refused to close the expired position - retrying.',
+              });
+              continue;
             }
           }
           await db.update(signalsSchema).set({ isProvisional: 0 }).where(eq(signalsSchema.id, sig.id));
@@ -111,7 +133,12 @@ function App() {
 
         if (openTradesInDb.length === 0) return;
 
-        const openPositions: OpenPosition[] = await mt5.adapter.getOpenPositions();
+        const openPositions: OpenPosition[] | null = await mt5.adapter.getOpenPositions();
+        if (!openPositions) {
+          // Broker state unknown this tick - never infer closures from it
+          logger.warn('Open positions unavailable - skipping reconciliation');
+          return;
+        }
         const openTickets = new Set(openPositions.map((p) => String(p.ticket)));
 
         const newProfits: Record<string, number> = {};
@@ -131,31 +158,28 @@ function App() {
         const tsDistancePips = settings.trailingStopDistancePips || 0;
 
         for (const t of openTradesInDb) {
+          if (openTickets.has(t.id)) missedPolls.current.delete(t.id);
           if (t.id.startsWith('paper-')) {
             // Simulated trades are managed entirely by the paper adapter's own
             // lifecycle - the MT5 position poll must not close them.
             continue;
           }
           if (!openTickets.has(t.id)) {
-            // Missing from MT5 open positions -> it closed on the broker side.
-            // Prefer the broker's own deal history for realized P&L; fall back
-            // to the last known floating value only if history is unavailable.
-            let pnl: number | null = null;
-            if (typeof mt5.adapter.getDeals === 'function') {
-              const deals = await mt5.adapter.getDeals(t.id);
-              if (deals && deals.length > 0) {
-                pnl = deals.reduce(
-                  (sum, d) => sum + (d.profit ?? 0) + (d.commission ?? 0) + (d.swap ?? 0),
-                  0
-                );
-              }
-            }
-            if (pnl === null && typeof mt5.liveProfits[t.id] === 'number') {
-              pnl = mt5.liveProfits[t.id];
-            }
+            // Missing from MT5 open positions. Only the broker's deal history
+            // (or repeated misses when it has none) confirms the close.
+            const misses = (missedPolls.current.get(t.id) ?? 0) + 1;
+            missedPolls.current.set(t.id, misses);
+            const deals = typeof mt5.adapter.getDeals === 'function'
+              ? await mt5.adapter.getDeals(t.id)
+              : null;
+            const decision = decideClosure(deals, misses, mt5.liveProfits[t.id]);
+            if (decision.action === 'WAIT') continue;
+
+            const { pnl } = decision;
             await db.update(trades)
               .set({ status: pnl !== null && pnl >= 0 ? 'CLOSED_WIN' : 'CLOSED_LOSS', pnl, closedAt: Date.now() })
               .where(eq(trades.id, t.id));
+            missedPolls.current.delete(t.id);
             changed = true;
             logger.info({ tradeId: t.id, pnl }, 'Position closed on broker');
           } else if (autoBreakeven || trailingStop) {
@@ -206,6 +230,8 @@ function App() {
         }
       } catch (err) {
         logger.error({ err }, "Trade monitor error");
+      } finally {
+        running = false;
       }
     }, 5000);
     return () => clearInterval(interval);

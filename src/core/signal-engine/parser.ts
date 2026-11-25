@@ -12,7 +12,7 @@ import { logger } from '../logger';
  */
 export class RegexParser implements SignalParser {
   version(): string {
-    return '1.3.0';
+    return '1.4.0';
   }
 
   canParse(message: string): boolean {
@@ -40,7 +40,7 @@ export class RegexParser implements SignalParser {
 
     // A message carrying real levels is a complete signal, not an intent -
     // the normal pipeline handles it.
-    if (/(?:STOP(?:[\s_]*LOSS)?|SL|S\/L)[\s:-]*[\d.]/.test(upperMsg)) return null;
+    if (/(?:STOP(?:[\s_]*LOSS)?|SL|S\/L)[\s:.-]*[\d.]/.test(upperMsg)) return null;
 
     // Format: PAIR: XAUUSD \n ORDER TYPE: BUY
     const pairMatch = upperMsg.match(/(?:PAIR|SYMBOL):\s*([A-Z0-9]+)[\s\S]*?(?:ORDER TYPE|DIRECTION|ACTION):\s*(BUY|SELL)/);
@@ -48,17 +48,17 @@ export class RegexParser implements SignalParser {
       return { symbol: pairMatch[1], direction: pairMatch[2] as TradeDirection };
     }
 
-    // Direction-first: "SELL GOLD", "BUY BTCUSD", optionally with a price.
+    // Direction-first: "SELL GOLD", "BUY NOW BTCUSD", optionally with a price.
     // The keyword must START a line - "we should buy gold here" is chatter,
-    // not an order. Target labels are excluded so "BUY TARGET..." never
-    // parses TARGET as a symbol.
-    const dirFirst = upperMsg.match(/(?:^|\n)\s*(BUY|SELL)\s+(?!TARGET\b|TGT\b|T\/P\b|TP\b)([A-Z0-9]{2,10})\b/);
+    // not an order. Order-type and label words are never symbols, and
+    // symbols start with a letter ("BUY 3350" names no instrument).
+    const dirFirst = upperMsg.match(/(?:^|\n)\s*(BUY|SELL)(?:\s+(?:LIMIT|STOP|NOW|MARKET)\b)?\s+(?!(?:TARGET|TGT|T\/P|TP|SL|S\/L|STOP|LOSS|LIMIT|NOW|MARKET|ENTRY|PRICE|ZONE|AT)\b)([A-Z][A-Z0-9]{1,9})\b/);
     if (dirFirst) {
       return { symbol: dirFirst[2], direction: dirFirst[1] as TradeDirection };
     }
 
     // Symbol-first, also anchored to a line start: "XAUUSD SELL"
-    const symFirst = upperMsg.match(/(?:^|\n)\s*([A-Z0-9]{2,10})\s+(BUY|SELL)\b/);
+    const symFirst = upperMsg.match(/(?:^|\n)\s*(?!(?:NOW|MARKET|LIMIT|STOP)\b)([A-Z][A-Z0-9]{1,9})\s+(BUY|SELL)\b/);
     if (symFirst) {
       return { symbol: symFirst[1], direction: symFirst[2] as TradeDirection };
     }
@@ -81,17 +81,19 @@ export class RegexParser implements SignalParser {
         symbol = pairMatch[1];
         direction = pairMatch[2] as TradeDirection;
       } else {
-        // Try format: BUY GOLD @ 4068
-        // Label words (TARGET/TP/...) are excluded so messages like
-        // "XAUUSD BUY TARGET 3400" don't parse TARGET as the symbol.
-        const buySellMatch = upperMsg.match(/(BUY|SELL)\s+(?!TARGET\b|TGT\b|T\/P\b|TP\b)([A-Z0-9]+)\s*(?:@|AT)?\s*([\d.]+)/);
+        // Try format: BUY GOLD @ 4068 / BUY LIMIT GOLD 4068
+        // Order-type and label words are excluded so "XAUUSD BUY TARGET 3400",
+        // "BUY LIMIT 3350" or "SELL\nSTOP LOSS 3360" never parse those words
+        // as the symbol; symbols start with a letter so "BUY 3350" can't
+        // become symbol "335".
+        const buySellMatch = upperMsg.match(/(BUY|SELL)(?:\s+(?:LIMIT|STOP|NOW|MARKET)\b)?\s+(?!(?:TARGET|TGT|T\/P|TP|SL|S\/L|STOP|LOSS|LIMIT|NOW|MARKET|ENTRY|PRICE|ZONE|AT)\b)([A-Z][A-Z0-9]*)\s*(?:@|AT)?\s*([\d.]+)/);
         if (buySellMatch) {
           direction = buySellMatch[1] as TradeDirection;
           symbol = buySellMatch[2];
           entry = parseFloat(buySellMatch[3]);
         } else {
-          // Try format: XAUUSD BUY
-          const headerMatch = upperMsg.match(/([A-Z0-9]+)\s+(BUY|SELL)/);
+          // Try format: XAUUSD BUY (the symbol must be a standalone word)
+          const headerMatch = upperMsg.match(/(?:^|[^A-Z0-9])(?!(?:NOW|MARKET|LIMIT|STOP|TP|SL|HIT)\b)([A-Z][A-Z0-9]*)\s+(BUY|SELL)\b/);
           if (headerMatch) {
             symbol = headerMatch[1];
             direction = headerMatch[2] as TradeDirection;
@@ -103,26 +105,37 @@ export class RegexParser implements SignalParser {
 
       // 2. Extract Entry (Optional but common)
       if (!entry) {
-        const entryMatch = upperMsg.match(/ENTRY(?: PRICE)?:\s*([\d.]+)/);
+        // "ENTRY: 3350", "ENTRY 3350", "ENTRY @ 3350", "ENTRY PRICE/ZONE: 3350"
+        const entryMatch = upperMsg.match(/ENTRY(?:\s*(?:PRICE|ZONE))?\s*[:@-]?\s*([\d.]+)/);
         if (entryMatch) {
           entry = parseFloat(entryMatch[1]);
         }
       }
+      if (!entry) {
+        // Price right after the direction: "BUY LIMIT 3350", "SELL @ 3350"
+        const directPrice = upperMsg.match(/(?:BUY|SELL)(?:\s+(?:LIMIT|STOP|NOW|MARKET)\b)?\s*(?:@|AT\b)?\s*(\d[\d.]*)/);
+        if (directPrice) {
+          entry = parseFloat(directPrice[1]);
+        }
+      }
 
       // 3. Extract Stop Loss (Required)
-      const slMatch = upperMsg.match(/(?:STOP(?:[\s_]*LOSS)?|SL|S\/L)[\s:-]*([\d.]+)/);
+      const slMatch = upperMsg.match(/(?:STOP(?:[\s_]*LOSS)?|SL|S\/L)[\s:.-]*([\d.]+)/);
       if (!slMatch) return null;
       const stopLoss = parseFloat(slMatch[1]);
 
       // 4. Extract Take Profits
       const takeProfits: TakeProfit[] = [];
       // After the label, exactly one separator alternative must match:
-      //   - a numbered label ("TP1:") optionally followed by : or -
+      //   - a numbered label ("TP1:") followed by : or -, or by a dot only
+      //     when whitespace follows ("TP1. 3360")
       //   - a numbered label glued to the price ("TP1 3360")
-      //   - a bare colon/minus ("TP:3360") or whitespace ("TP 3360")
+      //   - a bare colon/minus/dot ("TP:3360") or whitespace ("TP 3360")
       // Without the explicit digit-consumption branch, "TP1 3360" would parse
-      // the label digit itself as the take-profit price.
-      const tpRegex = /(?:TAKE(?:[\s_]*PROFIT)?|TP|T\/P|TARGET|TGT)(?:\s*\d{1,2}\s*[:-]\s*|\s*\d{1,2}\s+|[:-]\s*|\s+)([\d.]+)/g;
+      // the label digit itself as the take-profit price. The dot needs the
+      // whitespace guard, otherwise "TP 1.0850" reads "1." as a label and
+      // captures 850.
+      const tpRegex = /(?:TAKE(?:[\s_]*PROFIT)?|TP|T\/P|TARGET|TGT)(?:\s*\d{1,2}(?:\s*[:-]|\.(?=\s))\s*|\s*\d{1,2}\s+|[:.-]\s*|\s+)([\d.]+)/g;
       let tpMatch;
       while ((tpMatch = tpRegex.exec(upperMsg)) !== null) {
         // Prevent matching entry or SL accidentally if formatting is weird

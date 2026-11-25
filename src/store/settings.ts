@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { RiskConfiguration } from '../core/risk-engine/types';
-import { MT5_BRIDGE_DEFAULT_URL } from '../core/constants';
+import { MT5_BRIDGE_DEFAULT_URL, DEFAULT_MAX_SIGNAL_AGE_SECONDS, DEFAULT_MAX_POSITION_SIZE_LOTS } from '../core/constants';
 
 export interface GeneralSettings {
   displayLanguage: string;
@@ -39,6 +39,11 @@ export interface ExecutionSettings {
   instantEditWindowSeconds: number;
   /** What happens to a provisional trade when no valid edit arrives in time. */
   instantExpiryAction: 'CLOSE' | 'KEEP';
+  /**
+   * Maximum age of a signal at evaluation time. Optional so persisted
+   * settings predating it fall back to DEFAULT_MAX_SIGNAL_AGE_SECONDS.
+   */
+  maxSignalAgeSeconds?: number;
 }
 
 export interface TradingSettings {
@@ -70,8 +75,10 @@ export const DEFAULT_SETTINGS: TradingSettings = {
     maxOpenRiskPercent: 5.0,
     maxSlippagePoints: 30,
     newsFilterEnabled: false,
-    // Legacy behavior: round sub-minimum sizes UP to the broker minimum.
-    rejectBelowMinVolume: false,
+    // Never round sub-minimum sizes UP (that risks more than configured).
+    // Users on tiny accounts can opt into the legacy round-up on the Risk page.
+    rejectBelowMinVolume: true,
+    maxPositionSizeLots: DEFAULT_MAX_POSITION_SIZE_LOTS,
   },
   generalSettings: {
     displayLanguage: 'English (US)',
@@ -94,6 +101,7 @@ export const DEFAULT_SETTINGS: TradingSettings = {
     instantTargetRR: 2,
     instantEditWindowSeconds: 60,
     instantExpiryAction: 'CLOSE',
+    maxSignalAgeSeconds: DEFAULT_MAX_SIGNAL_AGE_SECONDS,
   }
 };
 
@@ -119,6 +127,8 @@ export const useSettingsStore = create<SettingsState>()(
         // Session-only secret: dropped from the persisted snapshot.
         const { mt5Password: _mt5Password, ...executionSettings } = state.executionSettings;
         return {
+          // A paused terminal must stay paused across crashes and autostart
+          tradingPaused: state.tradingPaused,
           accountBalance: state.accountBalance,
           riskConfig: state.riskConfig,
           generalSettings: state.generalSettings,

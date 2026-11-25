@@ -4,6 +4,7 @@ import { useSettingsStore } from './settings';
 import { Command } from '@tauri-apps/plugin-shell';
 import { logger } from '../core/logger';
 import { toast } from 'sonner';
+import { getBridgeToken } from '../core/bridge-auth';
 
 interface MT5State {
   isConnected: boolean;
@@ -206,7 +207,11 @@ async function tryStartBridge(adapter: MT5Adapter): Promise<boolean> {
     let spawned = false;
     try {
       logger.info({ launcher }, 'Attempting to auto-start Python Bridge...');
-      const command = Command.create(launcher, ['python-bridge/main.py']);
+      // Hand the bridge the same per-launch secret the adapter sends
+      const token = await getBridgeToken();
+      const command = Command.create(launcher, ['python-bridge/main.py'], {
+        env: token ? { BRIDGE_TOKEN: token } : {},
+      });
       command.on('error', (error) => logger.error({ err: error, launcher }, 'Python bridge process error'));
 
       const child = await command.spawn();

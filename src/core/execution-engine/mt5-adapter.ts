@@ -1,7 +1,8 @@
 import type { BrokerAdapter, ExecutionRequest, ExecutionResult, SymbolInfo, OpenPosition, PositionDeal } from './types';
 import { logger } from '../logger';
-import { MT5_BRIDGE_DEFAULT_URL, MIN_POSITION_SIZE_LOTS } from '../constants';
+import { MT5_BRIDGE_DEFAULT_URL, BRIDGE_REQUEST_TIMEOUT_MS, MAX_ENTRY_DRIFT_R } from '../constants';
 import { useSettingsStore } from '../../store/settings';
+import { getBridgeToken, BRIDGE_TOKEN_HEADER } from '../bridge-auth';
 
 export class MT5Adapter implements BrokerAdapter {
   private baseUrl: string;
@@ -27,6 +28,21 @@ export class MT5Adapter implements BrokerAdapter {
   }
 
   /**
+   * Every bridge call goes through here: attaches the per-launch auth token
+   * and bounds the wait so a hung bridge can never stall the signal pipeline.
+   */
+  private async request(path: string, init: RequestInit = {}): Promise<Response> {
+    const token = await getBridgeToken();
+    const headers = new Headers(init.headers);
+    if (token) headers.set(BRIDGE_TOKEN_HEADER, token);
+    return fetch(`${this.baseUrl}${path}`, {
+      ...init,
+      headers,
+      signal: init.signal ?? AbortSignal.timeout(BRIDGE_REQUEST_TIMEOUT_MS),
+    });
+  }
+
+  /**
    * Resolve a signal symbol to the broker's exact instrument name.
    * Signal providers post e.g. "BTCUSD"/"BTCUSDM" while brokers expose
    * "BTCUSDm" / "XAUUSD.a"-style names, and MT5 matching is case-sensitive -
@@ -40,8 +56,8 @@ export class MT5Adapter implements BrokerAdapter {
     if (cached) return cached;
 
     try {
-      const response = await fetch(
-        `${this.baseUrl}/symbols?query=${encodeURIComponent(key.slice(0, 6))}`
+      const response = await this.request(
+        `/symbols?query=${encodeURIComponent(key.slice(0, 6))}`
       );
       if (!response.ok) return symbol;
       const data = await response.json();
@@ -63,7 +79,14 @@ export class MT5Adapter implements BrokerAdapter {
         .filter((n) => norm(n).startsWith(target))
         .sort((a, b) => a.length - b.length);
       if (candidates.length > 0) {
-        // Prefer the shortest match - closest to the base instrument
+        // Prefer the shortest match - closest to the base instrument - but
+        // only when it is unique: "BTC" matching both BTCUSD and BTCEUR names
+        // no single instrument, and guessing would trade the wrong market.
+        const shortest = candidates.filter((n) => n.length === candidates[0].length);
+        if (shortest.length > 1) {
+          logger.warn({ requested: symbol, candidates: shortest }, 'Ambiguous broker symbol - not resolving');
+          return symbol;
+        }
         return commit(candidates[0]);
       }
 
@@ -76,7 +99,7 @@ export class MT5Adapter implements BrokerAdapter {
 
   async isConnected(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/health`);
+      const response = await this.request(`/health`);
       if (!response.ok) return false;
       const data = await response.json();
       return data.status === 'ok' && data.connected;
@@ -88,7 +111,7 @@ export class MT5Adapter implements BrokerAdapter {
 
   async loginBroker(params: { login?: string; password?: string; server?: string; path?: string }): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/login`, {
+      const response = await this.request(`/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
@@ -103,8 +126,11 @@ export class MT5Adapter implements BrokerAdapter {
 
   async executeTrade(request: ExecutionRequest): Promise<ExecutionResult> {
     try {
-      // Fallback until the risk engine always supplies a computed size
-      const volume = request.positionSize > 0 ? request.positionSize : MIN_POSITION_SIZE_LOTS;
+      // Never substitute a size: a missing/zero/NaN volume is a caller bug
+      if (!(request.positionSize > 0) || !Number.isFinite(request.positionSize)) {
+        return { success: false, message: `Invalid position size: ${request.positionSize}`, executedAt: new Date() };
+      }
+      const volume = request.positionSize;
 
       // Slippage tolerance (max deviation in points) comes from risk config;
       // floored at 1 since MT5 treats 0 as "no slippage allowed".
@@ -116,7 +142,7 @@ export class MT5Adapter implements BrokerAdapter {
       // Route to the broker's exact instrument name (case/suffix tolerant)
       const symbol = await this.resolveSymbol(request.signal.symbol);
 
-      const response = await fetch(`${this.baseUrl}/trade/execute`, {
+      const response = await this.request(`/trade/execute`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -131,6 +157,8 @@ export class MT5Adapter implements BrokerAdapter {
           // live market price at execution time (prevents invalid-stop rejections)
           entry: request.signal.entry ?? null,
           deviation: maxSlippagePoints,
+          // Bridge refuses to re-anchor when price already ran this share of the stop
+          maxEntryDriftR: MAX_ENTRY_DRIFT_R,
           // Lets the bridge dedupe retries (e.g. after a network timeout) so
           // the same signal leg can never open a second position.
           idempotencyKey: `${request.signalId}#${request.splitIndex ?? 0}`,
@@ -156,7 +184,7 @@ export class MT5Adapter implements BrokerAdapter {
 
   async getAccountInfo(): Promise<{ balance: number; equity: number; currency: string; tradeMode?: number; server?: string; company?: string } | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/account`);
+      const response = await this.request(`/account`);
       if (!response.ok) return null;
       const data = await response.json();
       return {
@@ -173,22 +201,22 @@ export class MT5Adapter implements BrokerAdapter {
     }
   }
 
-  async getOpenPositions(): Promise<OpenPosition[]> {
+  async getOpenPositions(): Promise<OpenPosition[] | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/positions`);
-      if (!response.ok) return [];
+      const response = await this.request(`/positions`);
+      if (!response.ok) return null;
       const data = await response.json();
-      return data.success ? data.positions : [];
+      return data.success && Array.isArray(data.positions) ? data.positions : null;
     } catch (e) {
       logger.error({ err: e }, 'MT5 positions fetch failed');
-      return [];
+      return null;
     }
   }
 
   async getSymbolPrice(symbol: string): Promise<{ ask: number; bid: number } | null> {
     try {
       const resolved = await this.resolveSymbol(symbol);
-      const response = await fetch(`${this.baseUrl}/price?symbol=${encodeURIComponent(resolved)}`);
+      const response = await this.request(`/price?symbol=${encodeURIComponent(resolved)}`);
       if (!response.ok) return null;
       const data = await response.json();
       return data.success ? { ask: data.ask, bid: data.bid } : null;
@@ -201,7 +229,7 @@ export class MT5Adapter implements BrokerAdapter {
   async getSymbolInfo(symbol: string): Promise<SymbolInfo | null> {
     try {
       const resolved = await this.resolveSymbol(symbol);
-      const response = await fetch(`${this.baseUrl}/symbol_info?symbol=${encodeURIComponent(resolved)}`);
+      const response = await this.request(`/symbol_info?symbol=${encodeURIComponent(resolved)}`);
       if (!response.ok) return null;
       const data = await response.json();
       return data.success ? {
@@ -220,7 +248,7 @@ export class MT5Adapter implements BrokerAdapter {
 
   async getDeals(positionTicket: string | number): Promise<PositionDeal[] | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/deals?position=${encodeURIComponent(String(positionTicket))}`);
+      const response = await this.request(`/deals?position=${encodeURIComponent(String(positionTicket))}`);
       if (!response.ok) return null;
       const data = await response.json();
       return data.success ? data.deals : null;
@@ -232,7 +260,7 @@ export class MT5Adapter implements BrokerAdapter {
 
   async closeTrade(ticket: string | number, volume?: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/trade/close`, {
+      const response = await this.request(`/trade/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket: Number(ticket), ...(volume != null ? { volume } : {}) }),
@@ -246,7 +274,7 @@ export class MT5Adapter implements BrokerAdapter {
 
   async modifyTrade(ticket: string | number, sl?: number, tp?: number): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await fetch(`${this.baseUrl}/trade/modify`, {
+      const response = await this.request(`/trade/modify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticket: Number(ticket), sl, tp }),
