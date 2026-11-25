@@ -15,7 +15,7 @@ function StatBlock({ label, delay, value, badge, valueClass = "" }: {
       <div className="text-sm font-medium text-secondary mb-1">{label}</div>
       <div className="flex items-center gap-3">
         <span className={`text-2xl font-medium tabular-nums ${valueClass}`}>{value}</span>
-        <span className="text-xs font-medium text-secondary bg-elevated px-1.5 py-0.5 rounded">{badge}</span>
+        <span className="text-xs font-medium text-secondary bg-elevated px-1.5 py-0.5 rounded whitespace-nowrap">{badge}</span>
       </div>
     </motion.div>
   )
@@ -35,18 +35,19 @@ export function WelcomeHeader() {
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, ease: "easeOut" }}
-      className="flex items-center justify-between mb-8"
+      className="flex flex-wrap items-center justify-between gap-x-12 gap-y-6 mb-8"
     >
       <motion.div
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.2, duration: 0.5 }}
+        className="min-w-[260px] flex-1 max-w-md"
       >
         <h1 className="text-3xl font-medium text-primary mb-2">Welcome, Trader</h1>
         <p className="text-secondary text-sm">Signals from your Telegram channels, risk-checked and executed on MetaTrader 5.</p>
       </motion.div>
       
-      <div className="flex gap-12">
+      <div className="flex flex-wrap gap-x-10 gap-y-4">
         <StatBlock
           label="Balance"
           delay={0.3}
@@ -70,7 +71,7 @@ export function WelcomeHeader() {
           label="Drawdown"
           delay={0.6}
           value={`${drawdownPercent.toFixed(1)}%`}
-          badge={drawdownSafe ? `Safe (< ${maxDrawdownPercent}%)` : `Breach (> ${maxDrawdownPercent}%)`}
+          badge={drawdownSafe ? `Limit ${maxDrawdownPercent}%` : `Over ${maxDrawdownPercent}%`}
           valueClass={!drawdownSafe ? "text-destructive" : ""}
         />
       </div>

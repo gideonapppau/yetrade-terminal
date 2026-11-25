@@ -190,7 +190,7 @@ export function SignalsPage() {
               }
             }}
             disabled={simulating}
-            className="px-4 py-1.5 bg-accent/10 text-accent border border-accent/20 rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-all flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+            className="shrink-0 whitespace-nowrap px-4 py-1.5 bg-accent/10 text-accent border border-accent/20 rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-all flex items-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
           >
             <Bot size={14} /> {simulating ? "Simulating..." : "Simulate BTC"}
           </button>

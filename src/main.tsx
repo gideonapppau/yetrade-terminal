@@ -14,6 +14,14 @@ if (typeof window !== 'undefined') {
 import './index.css'
 import App from './App.tsx'
 
+// Apply the saved theme before first paint so screens shown before the
+// dashboard layout mounts (e.g. Telegram login) match it too.
+{
+  const saved = localStorage.getItem('yettrade_theme')
+  const dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
+  document.documentElement.classList.toggle('dark', dark)
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

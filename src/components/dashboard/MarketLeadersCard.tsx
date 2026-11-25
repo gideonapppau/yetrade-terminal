@@ -61,13 +61,13 @@ export function MarketLeadersCard() {
         {channels.length === 0 ? (
            <div className="text-sm text-secondary text-center py-8">No channels connected yet.</div>
         ) : channels.map((channel, i) => (
-          <motion.div key={channel.id} variants={item} className="flex items-center justify-between group cursor-pointer p-2 -mx-2 rounded-xl hover:bg-surface/50 transition-colors">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-elevated flex items-center justify-center text-primary font-bold text-xs shadow-sm border border-border group-hover:border-primary/50 transition-colors">
+          <motion.div key={channel.id} variants={item} className="flex items-center justify-between gap-3 group p-2 -mx-2 rounded-xl hover:bg-surface/50 transition-colors">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 shrink-0 rounded-lg bg-elevated flex items-center justify-center text-primary font-bold text-xs shadow-sm border border-border group-hover:border-primary/50 transition-colors">
                 {i + 1}
               </div>
-              <div>
-                <div className="font-medium text-sm truncate">{channel.name}</div>
+              <div className="min-w-0">
+                <div className="font-medium text-sm truncate" title={channel.name}>{channel.name}</div>
                 <div className="text-xs text-secondary">{channel.isActive ? "Monitoring" : "Paused"}</div>
               </div>
             </div>

@@ -78,8 +78,8 @@ export function EquityChartCard({ data = [] }: EquityChartCardProps) {
             <AreaChart data={visibleData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="var(--accent)" stopOpacity={0}/>
+                  <stop offset="5%" stopColor="var(--color-accent)" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="var(--color-accent)" stopOpacity={0}/>
                 </linearGradient>
               </defs>
               <XAxis 
@@ -90,7 +90,7 @@ export function EquityChartCard({ data = [] }: EquityChartCardProps) {
                 }} 
                 axisLine={false}
                 tickLine={false}
-                tick={{ fontSize: 10, fill: 'var(--secondary)' }}
+                tick={{ fontSize: 10, fill: 'var(--color-secondary)' }}
                 dy={10}
               />
               <YAxis 
@@ -98,18 +98,18 @@ export function EquityChartCard({ data = [] }: EquityChartCardProps) {
                 axisLine={false}
                 tickLine={false}
                 tickFormatter={(val) => `${val.toFixed(0)}%`}
-                tick={{ fontSize: 10, fill: 'var(--secondary)' }}
+                tick={{ fontSize: 10, fill: 'var(--color-secondary)' }}
               />
               <Tooltip 
-                contentStyle={{ backgroundColor: 'var(--elevated)', borderColor: 'var(--border)', borderRadius: '8px', fontSize: '12px' }}
-                itemStyle={{ color: 'var(--primary)' }}
+                contentStyle={{ backgroundColor: 'var(--color-elevated)', borderColor: 'var(--color-border)', borderRadius: '8px', fontSize: '12px' }}
+                itemStyle={{ color: 'var(--color-primary)' }}
                 formatter={formatTooltip}
                 labelFormatter={formatLabel}
               />
               <Area 
                 type="monotone" 
                 dataKey="equity" 
-                stroke="var(--accent)" 
+                stroke="var(--color-accent)" 
                 strokeWidth={2}
                 fillOpacity={1} 
                 fill="url(#colorEquity)" 

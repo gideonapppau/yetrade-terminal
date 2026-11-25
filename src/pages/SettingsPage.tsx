@@ -486,10 +486,10 @@ export function SettingsPage() {
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium mb-1 text-secondary flex justify-between items-center">
-                          Broker Login (Account Number)
+                        <label className="text-sm font-medium mb-1 text-secondary flex justify-between items-center gap-2 whitespace-nowrap">
+                          Account Number
                           <div className="relative group flex items-center">
-                            <span className="text-accent text-xs font-normal hover:underline cursor-help">Where to find this?</span>
+                            <span className="text-accent text-xs font-normal hover:underline cursor-help">Where to find it?</span>
                             <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block w-64 p-3 bg-elevated border border-border rounded-lg shadow-xl text-xs text-secondary z-50 normal-case">
                               Check your broker's personal dashboard (e.g. <span className="text-primary font-medium">Exness</span>, <span className="text-primary font-medium">Deriv</span>, etc.) or your registration email for your MT5 Account Number.
                             </div>
@@ -585,44 +585,9 @@ export function SettingsPage() {
                   
                   <div className="space-y-6 max-w-xl">
                     <div>
-                      <label className="block text-sm font-medium mb-1">Display Language</label>
-                      <select 
-                        value={generalSettings.displayLanguage}
-                        onChange={(e) => setGeneralSettings({ displayLanguage: e.target.value })}
-                        className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors appearance-none"
-                      >
-                        <option>English (US)</option>
-                        <option>Spanish</option>
-                        <option>French</option>
-                      </select>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Timezone</label>
-                      <select 
-                        value={generalSettings.timezone}
-                        onChange={(e) => setGeneralSettings({ timezone: e.target.value })}
-                        className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors appearance-none"
-                      >
-                        <option>UTC (Default)</option>
-                        <option>America/New_York (EST)</option>
-                        <option>Europe/London (GMT)</option>
-                      </select>
-                      <p className="text-xs text-secondary mt-1">All signal times and historical charts will reflect this timezone.</p>
-                    </div>
-
-                    <div className="pt-4 border-t border-border">
-                      <label className="flex items-center gap-3 mb-4 cursor-pointer">
-                        <input type="checkbox" checked={generalSettings.enableDesktopNotifications} onChange={(e) => setGeneralSettings({ enableDesktopNotifications: e.target.checked })} className="w-4 h-4 text-accent border-border rounded focus:ring-accent" />
-                        <span className="text-sm font-medium">Enable Desktop Notifications</span>
-                      </label>
-                      <label className="flex items-center gap-3 mb-4 cursor-pointer">
+                      <label className="flex items-center gap-3 cursor-pointer">
                         <input type="checkbox" checked={generalSettings.soundAlerts} onChange={(e) => setGeneralSettings({ soundAlerts: e.target.checked })} className="w-4 h-4 text-accent border-border rounded focus:ring-accent" />
                         <span className="text-sm font-medium">Sound Alerts on New Signals</span>
-                      </label>
-                      <label className="flex items-center gap-3 cursor-pointer">
-                        <input type="checkbox" checked={generalSettings.autoStartBridge} onChange={(e) => setGeneralSettings({ autoStartBridge: e.target.checked })} className="w-4 h-4 text-accent border-border rounded focus:ring-accent" />
-                        <span className="text-sm font-medium">Auto-start Python Bridge on Launch</span>
                       </label>
                     </div>
 
@@ -822,7 +787,7 @@ export function SettingsPage() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 min-[1320px]:grid-cols-2 gap-4">
                     {channels.length === 0 ? (
                       <div className="col-span-full p-10 border border-dashed border-border rounded-xl bg-elevated/30 flex flex-col items-center justify-center text-center">
                         <div className="w-12 h-12 bg-elevated rounded-full flex items-center justify-center mb-3">
@@ -859,12 +824,12 @@ export function SettingsPage() {
                                 : "bg-transparent border-transparent opacity-60 grayscale-[20%]"
                             }`}
                           >
-                            <div className="flex items-center gap-4 min-w-0 z-10">
+                            <div className="flex items-center gap-4 min-w-0 flex-1 mr-3 z-10">
                               <ChannelAvatar channelId={channelId} title={name} size="sm" />
                               <div className="min-w-0">
-                                <h4 className="font-semibold text-sm tracking-tight mb-0.5 truncate flex items-center gap-2">
-                                  {name}
-                                  {isActive && <span className="bg-success/10 text-success text-[10px] font-medium px-2 py-0.5 rounded-full">Active</span>}
+                                <h4 className="font-semibold text-sm tracking-tight mb-0.5 flex items-center gap-2 min-w-0">
+                                  <span className="truncate" title={name}>{name}</span>
+                                  {isActive && <span className="shrink-0 bg-success/10 text-success text-[10px] font-medium px-2 py-0.5 rounded-full">Active</span>}
                                 </h4>
                                 <div className="text-[11px] text-secondary font-medium tracking-wide truncate">
                                   ID: {channelId}
@@ -886,9 +851,9 @@ export function SettingsPage() {
                                 <div className="relative group/hint flex items-center">
                                   <Info size={12} className="opacity-50 hover:opacity-100 cursor-help" />
                                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-primary text-primary-foreground text-[10px] rounded shadow-lg opacity-0 invisible group-hover/hint:opacity-100 group-hover/hint:visible transition-all z-50 normal-case font-normal text-center pointer-events-none">
-                                    {instantOn 
-                                      ? "ON: Trades execute immediately at the current market price when a signal is received." 
-                                      : "OFF: Bot sets limit orders and waits for the market to hit the specified entry price."}
+                                    {instantOn
+                                      ? "ON: direction-only posts (e.g. \"SELL GOLD\") open immediately with your provisional stop/target, then adopt the real levels when the channel edits the post."
+                                      : "OFF: only complete signals (with a stop loss) are traded; direction-only posts are ignored."}
                                   </div>
                                 </div>
                               </button>

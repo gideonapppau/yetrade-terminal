@@ -18,7 +18,9 @@ export function RiskPage() {
   const [maxDailyLoss, setMaxDailyLoss] = useState(riskConfig.maxDailyLossPercent)
   const [maxOpenRisk, setMaxOpenRisk] = useState(riskConfig.maxOpenRiskPercent)
   const [maxSlippage, setMaxSlippage] = useState(riskConfig.maxSlippagePoints)
-  const [newsFilter, setNewsFilter] = useState(riskConfig.newsFilterEnabled)
+  const [maxDrawdown, setMaxDrawdown] = useState(riskConfig.maxDrawdownPercent)
+  const [minRR, setMinRR] = useState(riskConfig.minRR)
+  const [maxOpenGroups, setMaxOpenGroups] = useState(riskConfig.maxOpenTradeGroups)
   const [rejectBelowMinVolume, setRejectBelowMinVolume] = useState(riskConfig.rejectBelowMinVolume === true)
   const [maxLots, setMaxLots] = useState(riskConfig.maxPositionSizeLots ?? DEFAULT_MAX_POSITION_SIZE_LOTS)
   
@@ -87,7 +89,12 @@ export function RiskPage() {
     maxOpenRiskPercent: sanitizeGlobalParam(maxOpenRisk),
     maxSlippagePoints: sanitizeGlobalParam(maxSlippage, { round: true }),
     maxPositionSizeLots: Number.isFinite(maxLots) && maxLots > 0 ? maxLots : DEFAULT_MAX_POSITION_SIZE_LOTS,
-    newsFilterEnabled: newsFilter,
+    maxDrawdownPercent: sanitizeGlobalParam(maxDrawdown, { max: 100 }),
+    minRR: Number.isFinite(minRR) && minRR >= 0 ? minRR : 1,
+    maxOpenTradeGroups: sanitizeGlobalParam(maxOpenGroups, { round: true }),
+    // No economic calendar is connected, so an enabled news filter would
+    // reject every signal. The switch is gone; saving clears a stale "on".
+    newsFilterEnabled: false,
     rejectBelowMinVolume: rejectBelowMinVolume
   });
 
@@ -214,12 +221,24 @@ export function RiskPage() {
                   <p className="text-xs text-secondary mb-2">Total concurrent risk across all open positions.</p>
                   <input type="number" value={maxOpenRisk} onChange={(e) => setMaxOpenRisk(Number(e.target.value))} onBlur={blurSanitizer(setMaxOpenRisk)} min="0.1" step="0.5" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Minimum Risk:Reward</label>
+                  <p className="text-xs text-secondary mb-2">Signals whose furthest target pays less than this multiple of the stop are rejected.</p>
+                  <input type="number" value={minRR} onChange={(e) => setMinRR(Number(e.target.value))} min="0" step="0.1" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Max Open Trades</label>
+                  <p className="text-xs text-secondary mb-2">Maximum signals open at once (a signal split across TPs counts once).</p>
+                  <input type="number" value={maxOpenGroups} onChange={(e) => setMaxOpenGroups(Number(e.target.value))} onBlur={blurSanitizer(setMaxOpenGroups, { round: true })} min="1" step="1" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                </div>
               </div>
 
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Max Slippage (Points)</label>
-                  <p className="text-xs text-secondary mb-2">Maximum allowed deviation from signal entry price.</p>
+                  <p className="text-xs text-secondary mb-2">How far (in points) MT5 may fill away from the price it was sent.</p>
                   <input type="number" value={maxSlippage} onChange={(e) => setMaxSlippage(Number(e.target.value))} onBlur={blurSanitizer(setMaxSlippage, { round: true })} min="1" step="1" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
                 </div>
 
@@ -231,16 +250,6 @@ export function RiskPage() {
                 
                 <div>
                   <label className="block text-sm font-medium mb-1 flex justify-between items-center">
-                    News Filter
-                    <div onClick={() => setNewsFilter(!newsFilter)} className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${newsFilter ? 'bg-accent' : 'bg-elevated border border-border'}`}>
-                      <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${newsFilter ? 'right-0.5' : 'left-0.5'}`}></span>
-                    </div>
-                  </label>
-                  <p className="text-xs text-secondary mb-2">Block trading 30m before and after High Impact (Red) news.</p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1 flex justify-between items-center">
                     Strict Minimum Lot Size
                     <div onClick={() => setRejectBelowMinVolume(!rejectBelowMinVolume)} className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${rejectBelowMinVolume ? 'bg-accent' : 'bg-elevated border border-border'}`}>
                       <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${rejectBelowMinVolume ? 'right-0.5' : 'left-0.5'}`}></span>
@@ -249,16 +258,15 @@ export function RiskPage() {
                   <p className="text-xs text-secondary mb-2">Skip trades whose computed size is below the broker minimum instead of oversizing them.</p>
                 </div>
                 
-                <div className="p-4 bg-warning/10 border border-warning/20 rounded-lg">
-                  <h4 className="text-warning text-sm font-bold flex items-center gap-2 mb-2">
-                    <ShieldAlert size={14} /> Protection Active
-                  </h4>
-                  <p className="text-xs text-secondary">The terminal is currently enforcing a maximum drawdown limit of 10% from the account High Water Mark.</p>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Max Drawdown (%)</label>
+                  <p className="text-xs text-secondary mb-2">New trades are blocked while open losses (balance minus equity) exceed this share of the balance.</p>
+                  <input type="number" value={maxDrawdown} onChange={(e) => setMaxDrawdown(Number(e.target.value))} onBlur={blurSanitizer(setMaxDrawdown, { max: 100 })} min="0.1" step="0.5" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
                 </div>
               </div>
             </div>
           </div>
-          
+
           <div className="card p-6">
             <h3 className="font-medium text-lg mb-6">Channel-Specific Overrides</h3>
             <p className="text-sm text-secondary mb-6">Set different risk parameters for specific Telegram channels. Leave blank to use Global Risk Parameters.</p>

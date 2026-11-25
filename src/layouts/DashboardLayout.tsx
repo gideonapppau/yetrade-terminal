@@ -186,7 +186,7 @@ export function DashboardLayout({ children, activePage, onPageChange }: Dashboar
                   {profile?.firstName?.[0] || 'T'}
                 </div>
               )}
-              <div className="flex items-center gap-1 font-medium text-sm">
+              <div className="flex items-center gap-1 font-medium text-sm whitespace-nowrap">
                 {profile?.firstName ? `${profile.firstName} ${profile.lastName || ''}`.trim() : 'Trader'}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform ${isProfileOpen ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
               </div>
