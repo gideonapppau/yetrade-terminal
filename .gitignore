@@ -60,3 +60,4 @@ src-tauri/bin/
 # Signal watchdog credentials (grant Telegram account access)
 tools/watchdog/watchdog.session*
 tools/watchdog/watchdog.config.json
+tools/watchdog/login-qr.png

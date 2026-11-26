@@ -135,6 +135,48 @@ async def login():
     await client.disconnect()
 
 
+async def login_qr():
+    """Login by scanning a QR code from the Telegram app - no SMS/code needed."""
+    import qrcode
+    from telethon import TelegramClient
+    from telethon.errors import SessionPasswordNeededError
+    if CONFIG.exists():
+        cfg = json.loads(CONFIG.read_text())
+    else:
+        print("Get api_id / api_hash at https://my.telegram.org -> API development tools\n")
+        cfg = {"api_id": int(input("api_id: ").strip()), "api_hash": input("api_hash: ").strip()}
+        CONFIG.write_text(json.dumps(cfg))
+    client = TelegramClient(str(SESSION.with_suffix("")), cfg["api_id"], cfg["api_hash"],
+                            device_model="YeTrade Watchdog")
+    await client.connect()
+    if await client.is_user_authorized():
+        print("Already logged in.")
+        await client.disconnect()
+        return
+
+    png = HERE / "login-qr.png"
+    qr_login = await client.qr_login()
+    while True:
+        qrcode.make(qr_login.url).save(png)
+        os.startfile(png)  # opens the QR in the default image viewer
+        print("\nOn your phone: Telegram -> Settings -> Devices -> Link Desktop Device,")
+        print(f"then scan the QR code that just opened ({png.name}).")
+        print("Waiting up to 60 seconds...")
+        try:
+            await qr_login.wait(timeout=60)
+            break
+        except asyncio.TimeoutError:
+            print("QR code expired - showing a fresh one.")
+            await qr_login.recreate()
+        except SessionPasswordNeededError:
+            await client.sign_in(password=input("Two-step verification password: "))
+            break
+    png.unlink(missing_ok=True)
+    me = await client.get_me()
+    print(f"\nLogged in as {me.first_name}. Session saved to {SESSION.name}.")
+    await client.disconnect()
+
+
 async def run():
     from telethon import TelegramClient, events
     if not APP_DB.exists():
@@ -198,7 +240,52 @@ async def run():
     emit("watchdog_error", where="telegram", error="disconnected")
 
 
+async def run_app_only():
+    """No Telegram login: follow the messages the APP records and audit each.
+
+    Cannot detect messages the app never received - use `run` for that."""
+    if not APP_DB.exists():
+        sys.exit(f"App database not found at {APP_DB}")
+    channels = active_channels()
+    emit("ready", mode="app-only", channels=list(channels.values()))
+    with db() as c:
+        last_seen = c.execute("select coalesce(max(received_at), 0) from telegram_messages").fetchone()[0]
+
+    while True:
+        await asyncio.sleep(5)
+        try:
+            channels = active_channels() or channels
+            with db() as c:
+                rows = c.execute(
+                    "select channel_id, message_id, text, received_at from telegram_messages "
+                    "where received_at > ? order by received_at", (last_seen,)).fetchall()
+            for channel_id, message_id, text, received_at in rows:
+                last_seen = max(last_seen, received_at)
+                asyncio.create_task(audit_recorded(channels, channel_id, message_id, text or ""))
+        except Exception as e:  # app may hold a write lock briefly
+            emit("watchdog_error", where="poll", error=str(e))
+
+
+async def audit_recorded(channels, channel_id, message_id, text):
+    # Shorter wait: the app already has the message, only the outcome is pending
+    await asyncio.sleep(15)
+    try:
+        report = {
+            "channel": channels.get(channel_id, channel_id),
+            "channel_id": channel_id,
+            "message_id": message_id,
+            "looks_like_signal": looks_like_signal(text),
+            "text": text[:TEXT_LIMIT],
+            **app_view(channel_id, message_id),
+        }
+        if report["looks_like_signal"] or report["signal"]:
+            report.update(mt5_view(channel_id, message_id))
+        emit("message", **report)
+    except Exception as e:
+        emit("watchdog_error", where="audit", message_id=message_id, error=str(e))
+
+
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
-    asyncio.run(login() if cmd == "login" else run())
+    asyncio.run({"login": login, "login-qr": login_qr, "app-only": run_app_only}.get(cmd, run)())

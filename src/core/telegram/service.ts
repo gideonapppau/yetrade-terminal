@@ -20,7 +20,7 @@ import type { ParsedSignal } from '../signal-engine/types';
 import type { OpenPosition } from '../execution-engine/types';
 import type { AccountState } from '../risk-engine/types';
 import { pipsToPoints, floorToStep } from '../../lib/utils';
-import { DEFAULT_MAX_SIGNAL_AGE_SECONDS } from '../constants';
+import { DEFAULT_MAX_SIGNAL_AGE_SECONDS, TELEGRAM_POLL_INTERVAL_MS, TELEGRAM_POLL_BATCH } from '../constants';
 import { toast } from 'sonner';
 import { playPop, playSuccess, playError } from '../../lib/sounds';
 
@@ -122,11 +122,39 @@ export function resolveRiskPercent(override: number | null | undefined, globalPe
   return override != null && override > 0 ? override : globalPercent;
 }
 
+/**
+ * Which polled messages still need processing, oldest first.
+ * - Later polls: everything newer than the last seen message id.
+ * - First poll of a channel (lastSeenId undefined): only messages young
+ *   enough to still be tradeable, so startup never replays old signals.
+ */
+export function selectNewMessages(
+  messages: RawTelegramMessage[],
+  lastSeenId: number | undefined,
+  maxAgeSeconds: number,
+  now: number = Date.now()
+): RawTelegramMessage[] {
+  return messages
+    .filter((m) =>
+      lastSeenId === undefined
+        ? now - m.timestamp.getTime() <= maxAgeSeconds * 1000
+        : Number(m.messageId) > lastSeenId
+    )
+    .sort((a, b) => Number(a.messageId) - Number(b.messageId));
+}
+
 export class TelegramService {
   private adapter: TelegramAdapter;
   private parser: RegexParser;
   private riskEngine: RiskEngine;
   private executionEngine: ExecutionEngine;
+  /** Messages already taken into the pipeline (push and poll can both deliver one). */
+  private processedMessages = new Set<string>();
+  /** Highest message id seen per channel by the polling fallback. */
+  private lastPolledId = new Map<string, number>();
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollChannelIds: string[] = [];
+  private polling = false;
 
   constructor(adapter: TelegramAdapter) {
     this.adapter = adapter;
@@ -175,12 +203,58 @@ export class TelegramService {
         this.handleNewMessage.bind(this),
         this.handleEditedMessage.bind(this)
       );
+      this.startPolling(channelIds);
     } catch (err: any) {
       logger.error({ err }, 'Failed to start Telegram listener');
       toast.error('Telegram listener failed to start', {
         description: err?.message || String(err),
         duration: Infinity,
       });
+    }
+  }
+
+  /**
+   * Fallback to push updates: fetch each monitored channel's latest messages
+   * on an interval and feed unseen ones into the same pipeline.
+   */
+  private startPolling(channelIds: string[]) {
+    this.pollChannelIds = channelIds;
+    if (this.pollTimer) return; // already running; the channel list was refreshed
+    const tick = () => void this.pollOnce();
+    tick();
+    this.pollTimer = setInterval(tick, TELEGRAM_POLL_INTERVAL_MS);
+  }
+
+  stopPolling() {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = null;
+  }
+
+  private async pollOnce() {
+    if (this.polling) return; // a slow poll must not overlap the next one
+    this.polling = true;
+    try {
+      const maxAge =
+        useSettingsStore.getState().executionSettings.maxSignalAgeSeconds ?? DEFAULT_MAX_SIGNAL_AGE_SECONDS;
+      for (const channelId of this.pollChannelIds) {
+        try {
+          const recent = await this.adapter.getRecentMessages(channelId, TELEGRAM_POLL_BATCH);
+          if (recent.length === 0) continue;
+          const fresh = selectNewMessages(recent, this.lastPolledId.get(channelId), maxAge);
+          const newest = Math.max(...recent.map((m) => Number(m.messageId)));
+          this.lastPolledId.set(channelId, Math.max(newest, this.lastPolledId.get(channelId) ?? 0));
+          for (const message of fresh) {
+            if (!this.processedMessages.has(`${message.channelId}:${message.messageId}`)) {
+              logger.info({ channelId, messageId: message.messageId }, 'Picked up message by polling');
+            }
+            await this.handleNewMessage(message);
+          }
+        } catch (err) {
+          logger.warn({ err, channelId }, 'Polling a Telegram channel failed');
+        }
+      }
+    } finally {
+      this.polling = false;
     }
   }
 
@@ -291,6 +365,12 @@ export class TelegramService {
   }
 
   async handleNewMessage(rawMessage: RawTelegramMessage) {
+    // Claimed synchronously: push and poll may deliver the same message at
+    // nearly the same moment, and both passing the DB duplicate check would
+    // execute the signal twice.
+    const messageKey = `${rawMessage.channelId}:${rawMessage.messageId}`;
+    if (this.processedMessages.has(messageKey)) return;
+    this.processedMessages.add(messageKey);
     try {
       // 1. Store the raw message exactly as received (before any parsing)
       await this.storeRawMessage(rawMessage);

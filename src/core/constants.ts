@@ -20,6 +20,17 @@ export const MAX_ENTRY_DRIFT_R = 0.5;
 export const TELEGRAM_DIALOGS_LIMIT = 200;
 
 /**
+ * Monitored channels are also polled on this interval. Push updates alone are
+ * unreliable (GramJS can silently stop receiving them after a reconnect, and
+ * Telegram does not always push large-channel posts), which left the app
+ * deaf to channel posts for hours.
+ */
+export const TELEGRAM_POLL_INTERVAL_MS = 15_000;
+
+/** Recent messages fetched per channel on each poll. */
+export const TELEGRAM_POLL_BATCH = 5;
+
+/**
  * Connection retry attempts for the Telegram MTProto client. GramJS also uses
  * this for reconnects after a drop - at 1, a single network blip silently
  * kills the listener for the rest of the session.

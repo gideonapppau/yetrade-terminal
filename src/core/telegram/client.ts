@@ -213,6 +213,44 @@ export class TelegramAdapter {
     logger.info({ channels: channelIds.length }, 'Subscribed to Telegram channels');
   }
 
+  /** Dialog entities keyed by bare channel/chat id, for history polling. */
+  private entityById = new Map<string, any>();
+
+  private async refreshEntities() {
+    if (!this.client) return;
+    const dialogs = await this.client.getDialogs({ limit: TELEGRAM_DIALOGS_LIMIT });
+    for (const dialog of dialogs) {
+      const entity: any = dialog.entity;
+      if (entity?.id != null) this.entityById.set(entity.id.toString(), entity);
+    }
+  }
+
+  /**
+   * Latest messages of one monitored chat, newest first. Backs the polling
+   * fallback so posts are picked up even when push updates stop arriving.
+   */
+  async getRecentMessages(channelId: string, limit: number): Promise<RawTelegramMessage[]> {
+    if (!this.client || this.state !== 'CONNECTED') return [];
+    const key = channelId.replace(/^-100/, '');
+    let entity = this.entityById.get(key);
+    if (!entity) {
+      await this.refreshEntities();
+      entity = this.entityById.get(key);
+    }
+    if (!entity) return [];
+
+    const messages: any[] = await this.client.getMessages(entity, { limit });
+    return messages
+      .filter((m) => m && m.id != null && m.date)
+      .map((m) => ({
+        channelId,
+        messageId: m.id.toString(),
+        timestamp: new Date(m.date * 1000),
+        text: m.message || '',
+        edited: false,
+      }));
+  }
+
   private photoCache: Map<string, string | null> = new Map();
 
   async getChannelPhoto(peer: string): Promise<string | null> {
