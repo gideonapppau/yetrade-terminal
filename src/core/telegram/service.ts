@@ -260,7 +260,7 @@ export class TelegramService {
           return;
         }
         if (!withinWindow) {
-          await db.update(signals).set({ status: 'EXPIRED' }).where(eq(signals.id, id));
+          await db.update(signals).set({ status: 'EXPIRED', rejectReason: 'Levels never arrived within the edit window' }).where(eq(signals.id, id));
           toast.info(`${signal.symbol}: signal expired`, {
             description: 'Levels never arrived in time.',
           });
@@ -457,7 +457,7 @@ export class TelegramService {
       toast.warning(`Trade Skipped: ${parsed.symbol}`, {
         description: rejectReason,
       });
-      await db.update(signals).set({ status: 'REJECTED' }).where(eq(signals.id, signalId));
+      await db.update(signals).set({ status: 'REJECTED', rejectReason: rejectReason ?? null }).where(eq(signals.id, signalId));
     } else if (riskEvaluation!.decision === 'APPROVED' && riskEvaluation!.positionSize !== null) {
       logger.info({ signalId, size: riskEvaluation!.positionSize }, 'Signal APPROVED by Risk Engine');
 
@@ -479,6 +479,7 @@ export class TelegramService {
 
       if (!executed) {
         rejectReason = this.executionEngine.lastFailureReason || 'The broker could not fill the trade.';
+        await db.update(signals).set({ rejectReason }).where(eq(signals.id, signalId));
         playSound(playError);
         toast.error(`Execution Missed: ${parsed.symbol}`, {
           description: rejectReason,
@@ -494,7 +495,7 @@ export class TelegramService {
         description: rejectReason,
       });
 
-      await db.update(signals).set({ status: 'REJECTED' }).where(eq(signals.id, signalId));
+      await db.update(signals).set({ status: 'REJECTED', rejectReason: rejectReason ?? null }).where(eq(signals.id, signalId));
     }
 
     // 5. Push to UI Store

@@ -41,6 +41,7 @@ export async function getDb() {
       `ALTER TABLE telegram_channels ADD COLUMN max_trades_per_day INTEGER;`,
       `ALTER TABLE telegram_channels ADD COLUMN instant_entry INTEGER;`,
       `ALTER TABLE signals ADD COLUMN is_provisional INTEGER;`,
+      `ALTER TABLE signals ADD COLUMN reject_reason TEXT;`,
     ]) {
       try {
         await sqlite.execute(alter);
@@ -214,6 +215,12 @@ export async function getDb() {
             mockSignals = mockSignals.map((s: any) =>
               s.id === params[2] ? { ...s, status: params[0], is_provisional: params[1] } : s
             );
+          } else if (lowerSql.includes('set "status" = ?, "reject_reason" = ?')) {
+            mockSignals = mockSignals.map((s: any) =>
+              s.id === params[2] ? { ...s, status: params[0], reject_reason: params[1] } : s
+            );
+          } else if (lowerSql.includes('set "reject_reason" = ?')) {
+            mockSignals = mockSignals.map((s: any) => s.id === params[1] ? { ...s, reject_reason: params[0] } : s);
           } else if (lowerSql.includes('set "is_provisional" = ?')) {
             mockSignals = mockSignals.map((s: any) => s.id === params[1] ? { ...s, is_provisional: params[0] } : s);
           } else if (lowerSql.includes('set "entry" = ?, "stop_loss" = ?')) {

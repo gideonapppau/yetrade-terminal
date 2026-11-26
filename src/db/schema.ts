@@ -32,6 +32,8 @@ export const signals = sqliteTable("signals", {
    *  provider's edit; the first valid amendment clears this back to 0.
    */
   isProvisional: integer("is_provisional"),
+  /** Why a signal was REJECTED or MISSED (risk rule, broker refusal...); null otherwise. */
+  rejectReason: text("reject_reason"),
 });
 
 export const trades = sqliteTable("trades", {
