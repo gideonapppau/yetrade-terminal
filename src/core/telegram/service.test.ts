@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { countOpenGroups, resolveRiskPercent, selectNewMessages } from './service';
+import { countOpenGroups, resolveRiskPercent, selectNewMessages, isRepostOf, REPOST_WINDOW_MS } from './service';
 
 describe('countOpenGroups', () => {
   it('counts TP legs of one signal as a single group', () => {
@@ -46,5 +46,24 @@ describe('selectNewMessages (polling fallback)', () => {
 
   it('returns nothing when no message is newer than the last seen id', () => {
     expect(selectNewMessages([msg(12, 30), msg(11, 60)], 12, 120, now)).toEqual([]);
+  });
+});
+
+describe('isRepostOf', () => {
+  const now = Date.parse('2026-11-26T11:23:18Z');
+  const prior = { symbol: 'XAUUSD', direction: 'SELL', entry: 3568, stopLoss: 3578, receivedAt: now - 11_000 };
+  const parsed = { symbol: 'XAUUSD', direction: 'SELL' as const, entry: 3568, stopLoss: 3578 };
+
+  it('flags an identical signal re-posted moments later (TRADE PULSE 3589/3590)', () => {
+    expect(isRepostOf(parsed, [prior], now)).toBe(true);
+  });
+
+  it('treats different levels or direction as a new signal', () => {
+    expect(isRepostOf({ ...parsed, stopLoss: 3580 }, [prior], now)).toBe(false);
+    expect(isRepostOf({ ...parsed, direction: 'BUY' }, [prior], now)).toBe(false);
+  });
+
+  it('ignores signals older than the re-post window', () => {
+    expect(isRepostOf(parsed, [{ ...prior, receivedAt: now - REPOST_WINDOW_MS - 1 }], now)).toBe(false);
   });
 });

@@ -2,6 +2,21 @@ import type { ParsedSignal, SignalParser, TakeProfit, TradeDirection } from './t
 import { logger } from '../logger';
 
 /**
+ * Canonical form of a provider's message before any matching:
+ *  - NFKC folds stylised Unicode letters/digits ("𝗕𝗨𝗬", "𝟯𝟱𝟲𝟴") to ASCII,
+ *  - emoji and pictographs become spaces, so "DIRECTION: 🔴SELL" reads as
+ *    "DIRECTION:  SELL" instead of hiding the direction from every pattern,
+ *  - dash variants become "-".
+ * Real channel posts are full of both; without this they parsed as nothing.
+ */
+export function normalizeSignalText(message: string): string {
+  return message
+    .normalize('NFKC')
+    .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}️‍⃣]/gu, ' ')
+    .replace(/[‐-―−]/g, '-');
+}
+
+/**
  * A deterministic Regex Parser for a standard signal format.
  * Format expected:
  * XAUUSD BUY
@@ -16,7 +31,7 @@ export class RegexParser implements SignalParser {
   }
 
   canParse(message: string): boolean {
-    const upperMsg = message.toUpperCase();
+    const upperMsg = normalizeSignalText(message).toUpperCase();
     return (upperMsg.includes('BUY') || upperMsg.includes('SELL')) &&
            (upperMsg.includes('SL') || upperMsg.includes('S/L') || upperMsg.includes('STOP') || upperMsg.includes('TP') || upperMsg.includes('T/P') || upperMsg.includes('TARGET'));
   }
@@ -28,7 +43,7 @@ export class RegexParser implements SignalParser {
    * strictly looks like an order command; chat noise must not trigger it.
    */
   parseIntent(message: string): { symbol: string; direction: TradeDirection } | null {
-    const trimmedMsg = message.trim();
+    const trimmedMsg = normalizeSignalText(message).trim();
     if (!trimmedMsg) return null;
 
     // Command-shape guards: intents are short imperative posts. Questions,
@@ -68,8 +83,8 @@ export class RegexParser implements SignalParser {
 
   parse(message: string): ParsedSignal | null {
     try {
-      const upperMsg = message.toUpperCase();
-      
+      const upperMsg = normalizeSignalText(message).toUpperCase();
+
       let symbol = '';
       let direction: TradeDirection | undefined = undefined;
       let entry: number | undefined = undefined;

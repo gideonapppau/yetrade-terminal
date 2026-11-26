@@ -143,6 +143,30 @@ export function selectNewMessages(
     .sort((a, b) => Number(a.messageId) - Number(b.messageId));
 }
 
+/** Window in which an identical re-post of a signal is treated as a duplicate. */
+export const REPOST_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * True when `parsed` repeats a signal this channel already posted recently
+ * (same symbol, direction, stop and entry). Providers often post the same
+ * alert twice; each copy has its own message id, so the id-based guard alone
+ * would open a second position.
+ */
+export function isRepostOf(
+  parsed: Pick<ParsedSignal, 'symbol' | 'direction' | 'entry' | 'stopLoss'>,
+  recent: Array<{ symbol: string; direction: string; entry: number | null; stopLoss: number | null; receivedAt: number }>,
+  now: number = Date.now()
+): boolean {
+  return recent.some(
+    (s) =>
+      now - s.receivedAt <= REPOST_WINDOW_MS &&
+      s.symbol === parsed.symbol &&
+      s.direction === parsed.direction &&
+      s.stopLoss === parsed.stopLoss &&
+      (s.entry ?? null) === (parsed.entry ?? null)
+  );
+}
+
 export class TelegramService {
   private adapter: TelegramAdapter;
   private parser: RegexParser;
@@ -395,6 +419,18 @@ export class TelegramService {
               { signalId, status: dupe[0].status },
               'Duplicate Telegram message ignored - signal already processed'
             );
+            return;
+          }
+
+          const recentFromChannel = await db
+            .select()
+            .from(signals)
+            .where(and(eq(signals.channelId, rawMessage.channelId), gte(signals.receivedAt, Date.now() - REPOST_WINDOW_MS)));
+          if (isRepostOf(parsed, recentFromChannel)) {
+            logger.info({ signalId, symbol: parsed.symbol }, 'Identical re-post of a recent signal ignored');
+            toast.info(`${parsed.symbol}: duplicate post ignored`, {
+              description: 'The channel re-posted a signal that was already handled.',
+            });
             return;
           }
 

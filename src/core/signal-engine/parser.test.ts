@@ -199,3 +199,43 @@ describe('RegexParser.parseIntent - order-type words', () => {
     expect(parser.parseIntent('BUY 3350')).toBeNull();
   });
 });
+
+describe('RegexParser - real channel formatting (emoji, stylised text)', () => {
+  const parser = new RegexParser();
+
+  // Verbatim TRADE PULSE post that parsed as null: the 🔴 between
+  // "DIRECTION:" and "SELL" hid the direction from every pattern.
+  const tradePulse =
+    "🚨 TRADE PULSE | SIGNAL ALERT\n━━━━━━━━━━━━━━━━━━\n\nPAIR: XAUUSD (GOLD)\n\nDIRECTION: 🔴SELL\n\n" +
+    "📍 ENTRY ZONE: 3568– 35672\n\n🛑 STOP LOSS: 3578\n\n🎯 TAKE PROFIT LEVELS \n\nTP1: 3555\nTP2: 3535\n" +
+    "━━━━━━━━━━━━━━━━━━\n⚠️ RISK MANAGEMENT IS KEY\nFollow proper risk management and protect your capital.\nTRADE SMART. STAY DISCIPLINED.";
+
+  it('parses a signal whose direction is prefixed by an emoji', () => {
+    expect(parser.parse(tradePulse)).toEqual({
+      symbol: 'XAUUSD',
+      direction: 'SELL',
+      entry: 3568,
+      stopLoss: 3578,
+      takeProfits: [{ price: 3555 }, { price: 3535 }],
+    });
+  });
+
+  it('parses emoji-decorated header-style signals', () => {
+    expect(parser.parse('🟢 XAUUSD BUY 🟢\n✅ ENTRY: 2650\n❌ SL: 2640\n🎯 TP1: 2665')).toEqual({
+      symbol: 'XAUUSD',
+      direction: 'BUY',
+      entry: 2650,
+      stopLoss: 2640,
+      takeProfits: [{ price: 2665 }],
+    });
+  });
+
+  it('folds stylised Unicode letters and digits to plain text', () => {
+    const parsed = parser.parse('𝗫𝗔𝗨𝗨𝗦𝗗 𝗕𝗨𝗬\nENTRY: 𝟮𝟲𝟱𝟬\nSL: 𝟮𝟲𝟰𝟬\nTP: 𝟮𝟲𝟳𝟬');
+    expect(parsed).toMatchObject({ symbol: 'XAUUSD', direction: 'BUY', entry: 2650, stopLoss: 2640 });
+  });
+
+  it('still detects emoji-prefixed intents', () => {
+    expect(parser.parseIntent('🔴 XAUUSD SELL NOW')).toEqual({ symbol: 'XAUUSD', direction: 'SELL' });
+  });
+});
