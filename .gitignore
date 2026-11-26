@@ -61,3 +61,4 @@ src-tauri/bin/
 tools/watchdog/watchdog.session*
 tools/watchdog/watchdog.config.json
 tools/watchdog/login-qr.png
+tools/watchdog/app-only.state

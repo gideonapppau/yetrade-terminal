@@ -27,6 +27,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SESSION = HERE / "watchdog.session"          # gitignored - grants account access
 CONFIG = HERE / "watchdog.config.json"       # gitignored - api id/hash
+APP_ONLY_STATE = HERE / "app-only.state"     # gitignored - last audited message time
 APP_DB = Path(os.environ.get("APPDATA", "")) / "com.yetrade.app" / "trading-terminal.db"
 
 # Give the app time to parse, risk-check and route the order before judging.
@@ -248,8 +249,13 @@ async def run_app_only():
         sys.exit(f"App database not found at {APP_DB}")
     channels = active_channels()
     emit("ready", mode="app-only", channels=list(channels.values()))
-    with db() as c:
-        last_seen = c.execute("select coalesce(max(received_at), 0) from telegram_messages").fetchone()[0]
+    # Resume from the last audited message so restarts never skip a post;
+    # a first run starts from "now" instead of replaying history.
+    try:
+        last_seen = int(APP_ONLY_STATE.read_text().strip())
+    except (OSError, ValueError):
+        with db() as c:
+            last_seen = c.execute("select coalesce(max(received_at), 0) from telegram_messages").fetchone()[0]
 
     while True:
         await asyncio.sleep(5)
@@ -262,6 +268,8 @@ async def run_app_only():
             for channel_id, message_id, text, received_at in rows:
                 last_seen = max(last_seen, received_at)
                 asyncio.create_task(audit_recorded(channels, channel_id, message_id, text or ""))
+            if rows:
+                APP_ONLY_STATE.write_text(str(last_seen))
         except Exception as e:  # app may hold a write lock briefly
             emit("watchdog_error", where="poll", error=str(e))
 
