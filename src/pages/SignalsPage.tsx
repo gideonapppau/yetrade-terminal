@@ -334,8 +334,14 @@ export function SignalsPage() {
                                 
                                 <div className="space-y-1 mt-2">
                                   <div className="flex justify-between items-center py-2.5 border-b border-border/50">
-                                    <span className="text-sm text-secondary">Risk ({riskPerTrade}%)</span>
-                                    {mt5Connected ? (
+                                    <span className="text-sm text-secondary">
+                                      {signal.riskAmount != null ? `Actual Risk (${signal.lots} lots)` : `Risk Budget (${riskPerTrade}%)`}
+                                    </span>
+                                    {signal.riskAmount != null ? (
+                                      <span className="text-base font-mono font-medium text-destructive">
+                                        {formatMoney(signal.riskAmount, mt5Currency)}
+                                      </span>
+                                    ) : mt5Connected ? (
                                       <span className="text-base font-mono font-medium text-destructive">
                                         {formatMoney(mt5Balance * (riskPerTrade / 100), mt5Currency)}
                                       </span>
@@ -346,7 +352,11 @@ export function SignalsPage() {
 
                                   <div className="flex justify-between items-center py-2.5 border-b border-border/50">
                                     <span className="text-sm text-secondary">Potential Reward</span>
-                                    {mt5Connected && signal.rr > 0 ? (
+                                    {signal.riskAmount != null && signal.rr > 0 ? (
+                                      <span className="text-base font-mono font-medium text-success">
+                                        {formatMoney(signal.riskAmount * signal.rr, mt5Currency)}
+                                      </span>
+                                    ) : mt5Connected && signal.rr > 0 ? (
                                       <span className="text-base font-mono font-medium text-success">
                                         {formatMoney(mt5Balance * (riskPerTrade / 100) * signal.rr, mt5Currency)}
                                       </span>

@@ -23,6 +23,23 @@ export function formatMoney(amount: number, currency = "USD") {
  * the given point size. On 5/3-digit instruments one pip equals ten points;
  * on even-digit pricing a point is a pip.
  */
+/**
+ * Money lost per lot over a price move of `distance`, from the broker's
+ * instrument metadata (tick value per tick size; contract size for brokers
+ * that report a zero tick value). Null when unknown.
+ */
+export function moneyRiskPerLot(
+  distance: number,
+  info: { trade_tick_value?: number; trade_tick_size?: number; trade_contract_size?: number } | undefined
+): number | null {
+  if (!info || !(distance > 0)) return null;
+  if ((info.trade_tick_size ?? 0) > 0 && (info.trade_tick_value ?? 0) > 0) {
+    return (distance / info.trade_tick_size!) * info.trade_tick_value!;
+  }
+  if ((info.trade_contract_size ?? 0) > 0) return distance * info.trade_contract_size!;
+  return null;
+}
+
 export function pipsToPoints(pips: number, point: number): number {
   if (!(point > 0)) return 0;
   const digits = Math.round(-Math.log10(point));

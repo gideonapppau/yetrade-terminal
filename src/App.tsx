@@ -14,8 +14,8 @@ import { eq, and, or } from "drizzle-orm"
 import { logger } from "./core/logger"
 import type { OpenPosition } from "./core/execution-engine/types"
 import { decideClosure } from "./core/execution-engine/reconcile"
-import { sendTradeReport, formatTradeClosed } from "./core/telegram/reports"
-import { pipsToPoints } from "./lib/utils"
+import { sendTradeReport, formatTradeClosed, tradeResultLabel } from "./core/telegram/reports"
+import { planStopAdjustment, initialRiskDistance } from "./core/execution-engine/trade-management"
 
 type TradeRecord = typeof trades.$inferSelect
 
@@ -150,13 +150,18 @@ function App() {
 
         let changed = false;
 
-        // Handle Trade Automation (Breakeven / Trailing)
+        // Handle Trade Automation (Breakeven / Trailing), measured in R
         const settings = useSettingsStore.getState().executionSettings;
         const autoBreakeven = settings.autoBreakEvenEnabled;
         const trailingStop = settings.trailingStopEnabled;
-        const beTriggerPips = settings.autoBreakEvenTriggerPips || 0;
-        const tsTriggerPips = settings.trailingStopTriggerPips || 0;
-        const tsDistancePips = settings.trailingStopDistancePips || 0;
+        const stopConfig = {
+          breakEven: { enabled: autoBreakeven, triggerR: settings.autoBreakEvenTriggerR ?? 1 },
+          trailing: {
+            enabled: trailingStop,
+            triggerR: settings.trailingStopTriggerR ?? 1.5,
+            distanceR: settings.trailingStopDistanceR ?? 1,
+          },
+        };
 
         for (const t of openTradesInDb) {
           if (openTickets.has(t.id)) missedPolls.current.delete(t.id);
@@ -189,38 +194,26 @@ function App() {
             const pos = openPositions.find((p) => String(p.ticket) === t.id);
             if (pos && typeof mt5.adapter.modifyTrade === 'function' && t.entryPrice) {
               const symbolInfo = await mt5.adapter.getSymbolInfo?.(pos.symbol);
-              if (symbolInfo && symbolInfo.point && pos.price_current != null) {
-                const point = symbolInfo.point;
-                const isBuy = pos.type === 'BUY';
-                const currentPrice = pos.price_current;
-                const entryPrice = t.entryPrice;
-                const currentSl = pos.sl ?? 0;
-
-                // Settings are in pips; the engine works in points
-                const beTrigger = pipsToPoints(beTriggerPips, point);
-                const tsTrigger = pipsToPoints(tsTriggerPips, point);
-                const tsDistance = pipsToPoints(tsDistancePips, point);
-
-                // Distance in points
-                const profitPoints = isBuy ? (currentPrice - entryPrice) / point : (entryPrice - currentPrice) / point;
-                let newSl = currentSl;
-
-                // 1. Trailing Stop
-                if (trailingStop && tsTrigger > 0 && tsDistance > 0 && profitPoints >= tsTrigger) {
-                  const candidateSl = isBuy ? currentPrice - tsDistance * point : currentPrice + tsDistance * point;
-                  // Move SL only if it's better than current SL
-                  if (isBuy && candidateSl > currentSl) newSl = candidateSl;
-                  if (!isBuy && (currentSl === 0 || candidateSl < currentSl)) newSl = candidateSl;
-                }
-                // 2. Breakeven
-                else if (autoBreakeven && beTrigger > 0 && profitPoints >= beTrigger) {
-                  // Move SL to entry once the trigger is reached
-                  if (isBuy && currentSl < entryPrice) newSl = entryPrice;
-                  if (!isBuy && (currentSl === 0 || currentSl > entryPrice)) newSl = entryPrice;
-                }
-
-                // Apply modification
-                if (newSl !== currentSl && Math.abs(newSl - currentSl) > point) {
+              // 1R comes from the signal's original stop - never from the
+              // broker's current stop, which these rules themselves move.
+              const signalRow = t.signalId
+                ? (await db.select().from(signalsSchema).where(eq(signalsSchema.id, t.signalId)))[0]
+                : undefined;
+              const riskDistance = initialRiskDistance(signalRow, t.entryPrice);
+              if (symbolInfo && symbolInfo.point && pos.price_current != null && riskDistance > 0) {
+                const newSl = planStopAdjustment(
+                  {
+                    isBuy: pos.type === 'BUY',
+                    entryPrice: t.entryPrice,
+                    currentPrice: pos.price_current,
+                    currentSl: pos.sl ?? 0,
+                    riskDistance,
+                    point: symbolInfo.point,
+                  },
+                  stopConfig
+                );
+                if (newSl !== null) {
+                  logger.info({ ticket: pos.ticket, newSl, riskDistance }, 'Moving stop (break-even / trailing)');
                   await mt5.adapter.modifyTrade(pos.ticket, newSl, pos.tp);
                 }
               }
@@ -325,7 +318,7 @@ function App() {
         t.volume,
         t.entryPrice ?? '',
         t.pnl ?? '',
-        t.status === 'CLOSED_WIN' ? 'Win' : 'Loss',
+        tradeResultLabel(t),
       ]
         .map((v) => `"${sanitizeCsvCell(v).replace(/"/g, '""')}"`)
         .join(',')
@@ -669,8 +662,8 @@ function App() {
                               {t.pnl == null ? '—' : `${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}`}
                             </td>
                             <td className="py-3 text-center">
-                              <span className={`px-2 py-1 rounded text-xs font-medium border ${t.status === 'CLOSED_WIN' ? 'bg-success-bg border-success/20 text-success' : 'bg-destructive-bg border-destructive/20 text-destructive'}`}>
-                                {t.status === 'CLOSED_WIN' ? 'Win' : 'Loss'}
+                              <span className={`px-2 py-1 rounded text-xs font-medium border ${tradeResultLabel(t) === 'Breakeven' ? 'bg-elevated border-border text-secondary' : t.status === 'CLOSED_WIN' ? 'bg-success-bg border-success/20 text-success' : 'bg-destructive-bg border-destructive/20 text-destructive'}`}>
+                                {tradeResultLabel(t)}
                               </span>
                             </td>
                           </motion.tr>

@@ -47,6 +47,14 @@ export interface ExecutionSettings {
   trailingStopTriggerPips: number;
   trailingStopDistancePips: number;
   /**
+   * Trade management in R (multiples of the trade's own initial stop). The
+   * pip fields above are legacy: one pip count meant $1 on BTC and gold.
+   * Optional so older persisted settings fall back to the defaults.
+   */
+  autoBreakEvenTriggerR?: number;
+  trailingStopTriggerR?: number;
+  trailingStopDistanceR?: number;
+  /**
    * Instant-entry defaults for fast channels that post direction first and
    * levels later (see the per-channel instant_entry flag).
    */
@@ -121,6 +129,9 @@ export const DEFAULT_SETTINGS: TradingSettings = {
     trailingStopEnabled: false,
     trailingStopTriggerPips: 30,
     trailingStopDistancePips: 15,
+    autoBreakEvenTriggerR: 1,
+    trailingStopTriggerR: 1.5,
+    trailingStopDistanceR: 1,
     instantEntryStopPips: 200,
     instantTargetRR: 2,
     instantEditWindowSeconds: 60,

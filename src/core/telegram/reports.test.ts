@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTradeOpened, formatSignalNotTraded, formatTradeClosed } from './reports';
+import { formatTradeOpened, formatSignalNotTraded, formatTradeClosed, tradeResultLabel } from './reports';
 
 const signal = { symbol: 'XAUUSD', direction: 'SELL', entry: 3568, stopLoss: 3578, takeProfit: 3555, source: 'TRADE PULSE' };
 
@@ -27,5 +27,14 @@ describe('trade report formatting', () => {
     expect(formatTradeClosed({ symbol: 'XAUUSD', direction: 'SELL', volume: 0.03, pnl: -24.1, ticket: '1' })).toContain(
       '🔻 Trade closed'
     );
+  });
+});
+
+describe('breakeven closes', () => {
+  it('labels a 0.00 close as Breakeven, not Win', () => {
+    expect(tradeResultLabel({ status: 'CLOSED_WIN', pnl: 0 })).toBe('Breakeven');
+    expect(tradeResultLabel({ status: 'CLOSED_WIN', pnl: 12.4 })).toBe('Win');
+    expect(tradeResultLabel({ status: 'CLOSED_LOSS', pnl: -3 })).toBe('Loss');
+    expect(formatTradeClosed({ symbol: 'BTCUSDM', direction: 'BUY', volume: 0.01, pnl: 0, ticket: '608422411' })).toContain('P/L +0.00 (breakeven)');
   });
 });

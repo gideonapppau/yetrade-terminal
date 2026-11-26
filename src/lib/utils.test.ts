@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pipsToPoints, formatMoney, floorToStep } from './utils';
+import { pipsToPoints, formatMoney, floorToStep, moneyRiskPerLot } from './utils';
 
 describe('pipsToPoints', () => {
   it('multiplies by ten on 5-digit FX pricing (pip = 10 points)', () => {
@@ -42,5 +42,17 @@ describe('floorToStep', () => {
   it('does not lose a step to float error', () => {
     expect(floorToStep(0.29, 0.01)).toBe(0.29);
     expect(floorToStep(0.3, 0.1)).toBe(0.3);
+  });
+});
+
+describe('moneyRiskPerLot', () => {
+  it('prices the BTC trade: 0.01 lots with a $1,000 stop risks $10, not the 1% budget', () => {
+    const btc = { trade_tick_value: 0.01, trade_tick_size: 0.01, trade_contract_size: 1 };
+    expect(0.01 * moneyRiskPerLot(1000, btc)!).toBeCloseTo(10, 6);
+  });
+
+  it('falls back to contract size and returns null when unknown', () => {
+    expect(moneyRiskPerLot(10, { trade_tick_value: 0, trade_tick_size: 0.01, trade_contract_size: 100 })).toBe(1000);
+    expect(moneyRiskPerLot(10, undefined)).toBeNull();
   });
 });

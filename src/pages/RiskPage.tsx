@@ -13,7 +13,13 @@ export function RiskPage() {
   const [channels, setChannels] = useState<any[]>([])
   const [saveMessage, setSaveMessage] = useState("")
   
-  const { riskConfig, setRiskConfig } = useSettingsStore()
+  const { riskConfig, setRiskConfig, executionSettings, setExecutionSettings } = useSettingsStore()
+  // Trade management, in R (multiples of each trade's own initial stop)
+  const [breakEvenOn, setBreakEvenOn] = useState(executionSettings.autoBreakEvenEnabled)
+  const [breakEvenR, setBreakEvenR] = useState(executionSettings.autoBreakEvenTriggerR ?? 1)
+  const [trailingOn, setTrailingOn] = useState(executionSettings.trailingStopEnabled)
+  const [trailTriggerR, setTrailTriggerR] = useState(executionSettings.trailingStopTriggerR ?? 1.5)
+  const [trailDistanceR, setTrailDistanceR] = useState(executionSettings.trailingStopDistanceR ?? 1)
   const [globalRisk, setGlobalRisk] = useState(riskConfig.riskPerTradePercent)
   const [maxDailyLoss, setMaxDailyLoss] = useState(riskConfig.maxDailyLossPercent)
   const [maxOpenRisk, setMaxOpenRisk] = useState(riskConfig.maxOpenRiskPercent)
@@ -145,6 +151,14 @@ export function RiskPage() {
       
       // Update global risk configuration (sanitized - never non-positive)
       setRiskConfig(sanitizedRiskPatch())
+      const positiveR = (v: number, fallback: number) => (Number.isFinite(v) && v > 0 ? v : fallback)
+      setExecutionSettings({
+        autoBreakEvenEnabled: breakEvenOn,
+        autoBreakEvenTriggerR: positiveR(breakEvenR, 1),
+        trailingStopEnabled: trailingOn,
+        trailingStopTriggerR: positiveR(trailTriggerR, 1.5),
+        trailingStopDistanceR: positiveR(trailDistanceR, 1),
+      })
       
       setSaveMessage("Settings saved successfully!")
       setTimeout(() => setSaveMessage(""), 3000)
@@ -262,6 +276,43 @@ export function RiskPage() {
                   <label className="block text-sm font-medium mb-1">Max Drawdown (%)</label>
                   <p className="text-xs text-secondary mb-2">New trades are blocked while open losses (balance minus equity) exceed this share of the balance.</p>
                   <input type="number" value={maxDrawdown} onChange={(e) => setMaxDrawdown(Number(e.target.value))} onBlur={blurSanitizer(setMaxDrawdown, { max: 100 })} min="0.1" step="0.5" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card p-6">
+            <h3 className="font-medium text-lg mb-2">Trade Management</h3>
+            <p className="text-sm text-secondary mb-6">
+              Measured in R - multiples of each trade's own risk (entry to its original stop loss), so the rules behave the same on forex, gold and crypto.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <label className="block text-sm font-medium flex justify-between items-center">
+                  Auto Break-Even
+                  <div onClick={() => setBreakEvenOn(!breakEvenOn)} className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${breakEvenOn ? 'bg-accent' : 'bg-elevated border border-border'}`}><span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${breakEvenOn ? 'right-0.5' : 'left-0.5'}`}></span></div>
+                </label>
+                <p className="text-xs text-secondary">Move the stop loss to the entry price once the trade is this far in profit.</p>
+                <div>
+                  <label className="block text-xs font-medium mb-1 text-secondary">Trigger (R)</label>
+                  <input type="number" value={breakEvenR} onChange={(e) => setBreakEvenR(Number(e.target.value))} disabled={!breakEvenOn} min="0.1" step="0.1" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors disabled:opacity-40" />
+                </div>
+              </div>
+              <div className="space-y-4">
+                <label className="block text-sm font-medium flex justify-between items-center">
+                  Trailing Stop
+                  <div onClick={() => setTrailingOn(!trailingOn)} className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${trailingOn ? 'bg-accent' : 'bg-elevated border border-border'}`}><span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${trailingOn ? 'right-0.5' : 'left-0.5'}`}></span></div>
+                </label>
+                <p className="text-xs text-secondary">Once in profit by the trigger, keep the stop this distance behind the price. Required for signals without a take profit.</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-secondary">Start at (R)</label>
+                    <input type="number" value={trailTriggerR} onChange={(e) => setTrailTriggerR(Number(e.target.value))} disabled={!trailingOn} min="0.1" step="0.1" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors disabled:opacity-40" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-secondary">Distance (R)</label>
+                    <input type="number" value={trailDistanceR} onChange={(e) => setTrailDistanceR(Number(e.target.value))} disabled={!trailingOn} min="0.1" step="0.1" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors disabled:opacity-40" />
+                  </div>
                 </div>
               </div>
             </div>

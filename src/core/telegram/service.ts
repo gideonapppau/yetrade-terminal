@@ -19,7 +19,7 @@ import { ExecutionEngine } from '../execution-engine';
 import type { ParsedSignal } from '../signal-engine/types';
 import type { OpenPosition } from '../execution-engine/types';
 import type { AccountState } from '../risk-engine/types';
-import { pipsToPoints, floorToStep } from '../../lib/utils';
+import { pipsToPoints, floorToStep, moneyRiskPerLot } from '../../lib/utils';
 import { DEFAULT_MAX_SIGNAL_AGE_SECONDS, TELEGRAM_POLL_INTERVAL_MS, TELEGRAM_POLL_BATCH } from '../constants';
 import { toast } from 'sonner';
 import { playPop, playSuccess, playError } from '../../lib/sounds';
@@ -546,7 +546,13 @@ export class TelegramService {
       maxTradesPerDay: effectiveMaxTradesPerDay,
     });
 
-    let symbolInfo = undefined;
+    let symbolInfo: {
+      trade_tick_value: number;
+      trade_tick_size: number;
+      trade_contract_size?: number;
+      volume_min?: number;
+      volume_step?: number;
+    } | undefined = undefined;
     if (mt5.isConnected && !blockReason) {
       const info = await mt5.adapter.getSymbolInfo(parsed.symbol);
       if (info) {
@@ -663,6 +669,12 @@ export class TelegramService {
       reason: rejectReason,
       raw: rawMessage.text,
       provisional: options.provisional && executed ? 'ARMED' : undefined,
+      lots: executed ? riskEvaluation?.positionSize ?? undefined : undefined,
+      riskAmount: (() => {
+        const lots = executed ? riskEvaluation?.positionSize : null;
+        const perLot = parsed.entry ? moneyRiskPerLot(Math.abs(parsed.entry - parsed.stopLoss), symbolInfo) : null;
+        return lots && perLot != null ? Math.round(lots * perLot * 100) / 100 : undefined;
+      })(),
       validation: [
         { text: "Symbol supported", status: true },
         { text: "Direction valid", status: true },

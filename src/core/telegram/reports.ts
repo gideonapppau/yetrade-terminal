@@ -47,9 +47,16 @@ export function formatSignalNotTraded(s: SignalSummary & { status: string; reaso
     .join('\n');
 }
 
+/** "Win" / "Loss" / "Breakeven" - a close at exactly 0.00 (e.g. stop moved to entry) is neither. */
+export function tradeResultLabel(t: { status: string; pnl: number | null }): 'Win' | 'Loss' | 'Breakeven' {
+  if (t.pnl != null && Math.abs(t.pnl) < 0.005) return 'Breakeven';
+  return t.status === 'CLOSED_WIN' ? 'Win' : 'Loss';
+}
+
 export function formatTradeClosed(t: { symbol: string; direction: string; volume: number; pnl: number | null; ticket: string }): string {
+  const outcome = t.pnl == null ? '' : Math.abs(t.pnl) < 0.005 ? 'breakeven' : t.pnl > 0 ? 'win' : 'loss';
   const result =
-    t.pnl == null ? 'P/L unknown' : `P/L ${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)} (${t.pnl >= 0 ? 'win' : 'loss'})`;
+    t.pnl == null ? 'P/L unknown' : `P/L ${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)} (${outcome})`;
   return `${t.pnl != null && t.pnl < 0 ? '🔻' : '🏁'} Trade closed: ${t.direction} ${t.symbol} · ${t.volume} lots\n${result} · #${t.ticket}`;
 }
 

@@ -17,6 +17,10 @@ export interface UiSignal {
   raw: string;
   /** Instant-entry lifecycle badge: armed = awaiting provider levels. */
   provisional?: 'ARMED' | 'ADJUSTED';
+  /** Lots actually sent to the broker (after rounding to the broker's step). */
+  lots?: number;
+  /** Money actually at risk for those lots at the posted stop. */
+  riskAmount?: number;
   validation: { text: string; status: boolean }[];
 }
 
