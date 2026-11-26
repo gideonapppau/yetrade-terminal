@@ -2,7 +2,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { logger } from './logger';
 
 /** Secrets the Tauri backend allows into the OS credential store. */
-export type SecretKey = 'telegram_session' | 'telegram_api_hash';
+export type SecretKey = 'telegram_session' | 'telegram_api_hash' | `mt5_password:${string}`;
+
+/** Credential-store key of one MT5 account's saved password. */
+export const mt5PasswordKey = (login: string): SecretKey => `mt5_password:${login.trim()}`;
 
 const inTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 

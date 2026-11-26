@@ -213,6 +213,14 @@ export class TelegramAdapter {
     logger.info({ channels: channelIds.length }, 'Subscribed to Telegram channels');
   }
 
+  /** Posts a message to the user's own "Saved Messages" chat. */
+  async sendToSavedMessages(text: string): Promise<void> {
+    if (!this.client || this.state !== 'CONNECTED') {
+      throw new Error('Telegram client is not connected');
+    }
+    await this.client.sendMessage('me', { message: text });
+  }
+
   /** Dialog entities keyed by bare channel/chat id, for history polling. */
   private entityById = new Map<string, any>();
 

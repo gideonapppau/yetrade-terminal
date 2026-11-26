@@ -5,6 +5,7 @@ import { Command } from '@tauri-apps/plugin-shell';
 import { logger } from '../core/logger';
 import { toast } from 'sonner';
 import { getBridgeToken } from '../core/bridge-auth';
+import { getSecret, mt5PasswordKey } from '../core/secrets';
 
 interface MT5State {
   isConnected: boolean;
@@ -80,13 +81,16 @@ export const useMT5Store = create<MT5State>((set, get) => ({
     }
 
     if (!connected) {
-       // Attempt auto-login with saved credentials
+       // Attempt auto-login with saved credentials. The password is never in
+       // persisted settings; after a restart it comes from the OS credential store.
        const settings = useSettingsStore.getState().executionSettings;
-       if (settings.mt5Login && settings.mt5Password && settings.mt5Server) {
+       const password =
+         settings.mt5Password || (settings.mt5Login ? await getSecret(mt5PasswordKey(settings.mt5Login)) : null);
+       if (settings.mt5Login && password && settings.mt5Server) {
           try {
              const res = await loginBroker({
                login: settings.mt5Login,
-               password: settings.mt5Password,
+               password,
                server: settings.mt5Server,
                path: settings.mt5Path
              });

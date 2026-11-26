@@ -5,7 +5,8 @@ import { telegramChannels } from "../db/schema"
 import { eq } from "drizzle-orm"
 import { useTelegramStore } from "../store/telegram"
 import { useMT5Store } from "../store/mt5"
-import { useSettingsStore } from "../store/settings"
+import { useSettingsStore, type SavedMt5Account } from "../store/settings"
+import { getSecret, setSecret, mt5PasswordKey } from "../core/secrets"
 import { logger } from "../core/logger"
 import { DEFAULT_MAX_SIGNAL_AGE_SECONDS } from "../core/constants"
 import type { TelegramChannelInfo } from "../core/telegram/types"
@@ -101,26 +102,114 @@ export function SettingsPage() {
   const [loginError, setLoginError] = useState("")
   const [bridgeUrlInput, setBridgeUrlInput] = useState(executionSettings.bridgeUrl)
 
-  const handleBrokerLogin = async () => {
+  const savedMt5Accounts = useSettingsStore((s) => s.savedMt5Accounts)
+  const upsertSavedMt5Account = useSettingsStore((s) => s.upsertSavedMt5Account)
+  const removeSavedMt5Account = useSettingsStore((s) => s.removeSavedMt5Account)
+  const [rememberPassword, setRememberPassword] = useState(true)
+  const [nickname, setNickname] = useState("")
+  /** Login of the saved account being edited; null when adding/connecting normally. */
+  const [editingLogin, setEditingLogin] = useState<string | null>(null)
+  /** First click on delete arms it; a second click within a few seconds confirms. */
+  const [confirmDeleteLogin, setConfirmDeleteLogin] = useState<string | null>(null)
+  const isSavedLogin = (login: string) => savedMt5Accounts.some((a) => a.login === login.trim())
+
+  /**
+   * Connects one account. An empty password falls back to the one saved in
+   * the OS credential store, so saved accounts never need retyping.
+   */
+  const connectAccount = async (
+    account: { login: string; server: string; path?: string; nickname?: string },
+    typedPassword: string,
+    replacesLogin?: string
+  ) => {
+    const login = account.login.trim()
     setIsLoggingIn(true)
     setLoginError("")
-    const res = await mt5.loginBroker({
-      login: brokerLogin,
-      password: brokerPassword,
-      server: brokerServer,
-      path: mt5Path || undefined
-    })
-    setIsLoggingIn(false)
-    if (!res.success) {
-      setLoginError(res.message)
-    } else {
-      setExecutionSettings({
-        mt5Login: brokerLogin,
-        mt5Password: brokerPassword,
-        mt5Server: brokerServer,
-        mt5Path: mt5Path
-      });
+    try {
+      const password =
+        typedPassword ||
+        (await getSecret(mt5PasswordKey(login))) ||
+        (replacesLogin ? await getSecret(mt5PasswordKey(replacesLogin)) : null) ||
+        ""
+      if (!password) {
+        setLoginError("Enter the password for this account (no saved password found).")
+        return false
+      }
+      const res = await mt5.loginBroker({ login, password, server: account.server, path: account.path || undefined })
+      if (!res.success) {
+        setLoginError(res.message)
+        return false
+      }
+      setExecutionSettings({ mt5Login: login, mt5Password: password, mt5Server: account.server, mt5Path: account.path || "" })
+      // Only an account that just connected successfully is ever saved.
+      if (rememberPassword || !typedPassword) await setSecret(mt5PasswordKey(login), password)
+      if (replacesLogin && replacesLogin !== login) {
+        // Edited to a different account number: drop the old entry and its password
+        await setSecret(mt5PasswordKey(replacesLogin), null)
+        removeSavedMt5Account(replacesLogin)
+      }
+      upsertSavedMt5Account({
+        login,
+        server: account.server,
+        path: account.path || undefined,
+        label: useMT5Store.getState().company || undefined,
+        nickname: account.nickname?.trim() || undefined,
+      })
+      setBrokerPassword("")
+      setEditingLogin(null)
+      return true
+    } finally {
+      setIsLoggingIn(false)
     }
+  }
+
+  const handleBrokerLogin = () =>
+    connectAccount(
+      { login: brokerLogin, server: brokerServer, path: mt5Path, nickname },
+      brokerPassword,
+      editingLogin ?? undefined
+    )
+
+  /** Puts a saved account's details into the form. */
+  const loadAccountIntoForm = (account: SavedMt5Account) => {
+    setBrokerLogin(account.login)
+    setBrokerServer(account.server)
+    setMt5Path(account.path || "")
+    setNickname(account.nickname || "")
+    setBrokerPassword("")
+    setLoginError("")
+    const broker = Object.entries(COMMON_BROKERS).find(([, servers]) => servers.includes(account.server))?.[0] ?? "Custom"
+    setSelectedBroker(broker)
+  }
+
+  const handleSwitchAccount = async (account: SavedMt5Account) => {
+    setEditingLogin(null)
+    loadAccountIntoForm(account)
+    await connectAccount(account, "")
+  }
+
+  const handleEditAccount = (account: SavedMt5Account) => {
+    loadAccountIntoForm(account)
+    setEditingLogin(account.login)
+  }
+
+  const handleCancelEdit = () => {
+    setEditingLogin(null)
+    setNickname("")
+    setBrokerPassword("")
+    setLoginError("")
+  }
+
+  const handleDeleteAccount = async (login: string) => {
+    if (confirmDeleteLogin !== login) {
+      setConfirmDeleteLogin(login)
+      setTimeout(() => setConfirmDeleteLogin((current) => (current === login ? null : current)), 4000)
+      return
+    }
+    setConfirmDeleteLogin(null)
+    await setSecret(mt5PasswordKey(login), null)
+    removeSavedMt5Account(login)
+    if (editingLogin === login) handleCancelEdit()
   }
 
   const handleSaveConfig = async () => {
@@ -484,6 +573,76 @@ export function SettingsPage() {
                       </div>
                     )}
 
+                    {savedMt5Accounts.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium mb-2 text-secondary">Saved Accounts</label>
+                        <div className="space-y-2">
+                          {savedMt5Accounts.map((account) => {
+                            const active = mt5.isConnected && executionSettings.mt5Login === account.login
+                            return (
+                              <div key={account.login} className={`flex items-center justify-between gap-3 p-3 rounded-lg border ${active ? 'border-success/40 bg-success/5' : 'border-border bg-elevated/40'}`}>
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium truncate">
+                                    {account.nickname || account.login}
+                                    {(account.nickname ? account.login : account.label) && (
+                                      <span className="text-secondary font-normal"> · {account.nickname ? account.login : account.label}</span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-secondary truncate">
+                                    {account.server}{account.nickname && account.label ? ` · ${account.label}` : ''}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {active ? (
+                                    <span className="text-xs font-medium text-success px-3 py-1.5">Connected</span>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleSwitchAccount(account)}
+                                      disabled={isLoggingIn}
+                                      className="text-xs font-medium px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                                    >
+                                      Switch
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleEditAccount(account)}
+                                    disabled={isLoggingIn}
+                                    title="Edit this account"
+                                    className={`p-1.5 rounded-md transition-colors disabled:opacity-50 ${editingLogin === account.login ? 'text-accent bg-accent/10' : 'text-secondary hover:text-primary hover:bg-elevated'}`}
+                                  >
+                                    <PencilLine size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteAccount(account.login)}
+                                    disabled={isLoggingIn}
+                                    title={confirmDeleteLogin === account.login ? "Click again to delete" : "Delete this account and its saved password"}
+                                    className={`rounded-md transition-colors disabled:opacity-50 ${confirmDeleteLogin === account.login ? 'px-2 py-1 text-xs font-medium bg-destructive text-destructive-foreground' : 'p-1.5 text-secondary hover:text-destructive hover:bg-destructive/10'}`}
+                                  >
+                                    {confirmDeleteLogin === account.login ? 'Delete?' : <Trash2 size={14} />}
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <p className="text-xs text-secondary mt-2">Passwords are kept in Windows Credential Manager, not in the app files.</p>
+                      </div>
+                    )}
+
+                    {editingLogin && (
+                      <div className="p-3 bg-accent/10 border border-accent/20 rounded-lg text-sm flex items-center justify-between gap-3">
+                        <span>
+                          Editing <span className="font-medium">{editingLogin}</span>. Changes are saved only after the account connects.
+                        </span>
+                        <button onClick={handleCancelEdit} className="text-xs font-medium text-secondary hover:text-primary shrink-0">Cancel</button>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium mb-1 text-secondary">Nickname (optional)</label>
+                      <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} placeholder="e.g. Exness demo, Prop account" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="text-sm font-medium mb-1 text-secondary flex justify-between items-center gap-2 whitespace-nowrap">
@@ -499,7 +658,7 @@ export function SettingsPage() {
                       </div>
                       <div>
                         <label className="block text-sm font-medium mb-1 text-secondary">Broker Password</label>
-                        <input type="password" value={brokerPassword} onChange={e => setBrokerPassword(e.target.value)} placeholder="••••••••" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
+                        <input type="password" value={brokerPassword} onChange={e => setBrokerPassword(e.target.value)} placeholder={isSavedLogin(brokerLogin) || editingLogin ? "Saved - leave blank to keep" : "••••••••"} className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
                       </div>
                     </div>
                     
@@ -562,13 +721,18 @@ export function SettingsPage() {
                       <input type="text" value={mt5Path} onChange={e => setMt5Path(e.target.value)} placeholder="e.g. C:\Program Files\MetaTrader 5\terminal64.exe" className="w-full bg-elevated border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-accent transition-colors" />
                     </div>
 
+                    <label className="flex items-center gap-3 cursor-pointer pt-2">
+                      <input type="checkbox" checked={rememberPassword} onChange={(e) => setRememberPassword(e.target.checked)} className="w-4 h-4 text-accent border-border rounded focus:ring-accent" />
+                      <span className="text-sm font-medium">Remember password and reconnect automatically</span>
+                    </label>
+
                     <div className="flex items-center gap-3 pt-4">
                       <button 
                         onClick={handleBrokerLogin}
-                        disabled={isLoggingIn || !brokerLogin.trim() || !brokerPassword.trim()}
+                        disabled={isLoggingIn || !brokerLogin.trim() || (!brokerPassword.trim() && !isSavedLogin(brokerLogin) && !editingLogin)}
                         className="bg-primary text-primary-foreground px-6 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
                       >
-                        {isLoggingIn ? "Connecting to MT5..." : "Connect Broker"}
+                        {isLoggingIn ? "Connecting to MT5..." : editingLogin ? "Save & Connect" : "Connect Broker"}
                       </button>
                       <span className="text-sm text-secondary">Make sure the Python bridge is running at {bridgeUrlInput.replace(/^https?:\/\//, "") || "the configured address"}</span>
                     </div>
@@ -588,6 +752,13 @@ export function SettingsPage() {
                       <label className="flex items-center gap-3 cursor-pointer">
                         <input type="checkbox" checked={generalSettings.soundAlerts} onChange={(e) => setGeneralSettings({ soundAlerts: e.target.checked })} className="w-4 h-4 text-accent border-border rounded focus:ring-accent" />
                         <span className="text-sm font-medium">Sound Alerts on New Signals</span>
+                      </label>
+                      <label className="flex items-start gap-3 cursor-pointer mt-4">
+                        <input type="checkbox" checked={generalSettings.telegramTradeReports !== false} onChange={(e) => setGeneralSettings({ telegramTradeReports: e.target.checked })} className="w-4 h-4 mt-0.5 text-accent border-border rounded focus:ring-accent" />
+                        <span>
+                          <span className="block text-sm font-medium">Telegram Trade Reports</span>
+                          <span className="block text-xs text-secondary mt-0.5">Send a message to your Telegram "Saved Messages" when a trade opens, when a signal is not traded (with the reason), and when a trade closes.</span>
+                        </span>
                       </label>
                     </div>
 

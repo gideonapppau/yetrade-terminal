@@ -15,8 +15,21 @@ fn bridge_token(state: tauri::State<'_, BridgeToken>) -> String {
 const SECRET_SERVICE: &str = "com.yetrade.app";
 const ALLOWED_SECRETS: &[&str] = &["telegram_session", "telegram_api_hash"];
 
+/// One saved broker password per MT5 account: "mt5_password:<account number>".
+const MT5_PASSWORD_PREFIX: &str = "mt5_password:";
+
+fn is_allowed_secret(key: &str) -> bool {
+    if ALLOWED_SECRETS.contains(&key) {
+        return true;
+    }
+    match key.strip_prefix(MT5_PASSWORD_PREFIX) {
+        Some(login) => !login.is_empty() && login.len() <= 20 && login.bytes().all(|b| b.is_ascii_digit()),
+        None => false,
+    }
+}
+
 fn secret_entry(key: &str) -> Result<keyring::Entry, String> {
-    if !ALLOWED_SECRETS.contains(&key) {
+    if !is_allowed_secret(key) {
         return Err(format!("unknown secret '{key}'"));
     }
     keyring::Entry::new(SECRET_SERVICE, key).map_err(|e| e.to_string())

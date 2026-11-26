@@ -9,12 +9,31 @@ export interface GeneralSettings {
   enableDesktopNotifications: boolean;
   soundAlerts: boolean;
   autoStartBridge: boolean;
+  /**
+   * Send trade reports (opened / not traded / closed) to the user's own
+   * Telegram "Saved Messages". Optional so older persisted settings default on.
+   */
+  telegramTradeReports?: boolean;
+}
+
+/** A broker account the user has connected before. Its password lives in the OS credential store. */
+export interface SavedMt5Account {
+  login: string;
+  server: string;
+  path?: string;
+  /** Broker company / account name from MT5, for display. */
+  label?: string;
+  /** User-chosen name, e.g. "Exness demo". */
+  nickname?: string;
 }
 
 export interface ExecutionSettings {
   bridgeUrl: string;
   mt5Login?: string;
-  /** Session-only: never written to disk. */
+  /**
+   * In-memory only - never persisted to localStorage. Saved passwords live in
+   * the OS credential store (see core/secrets.ts, key mt5_password:<login>).
+   */
   mt5Password?: string;
   mt5Server?: string;
   mt5Path?: string;
@@ -54,6 +73,10 @@ export interface TradingSettings {
 }
 
 interface SettingsState extends TradingSettings {
+  /** Accounts connected before, for one-click switching. */
+  savedMt5Accounts: SavedMt5Account[];
+  upsertSavedMt5Account: (account: SavedMt5Account) => void;
+  removeSavedMt5Account: (login: string) => void;
   /** Global kill-switch: when true, incoming signals are never executed. */
   tradingPaused: boolean;
   setAccountBalance: (balance: number) => void;
@@ -86,6 +109,7 @@ export const DEFAULT_SETTINGS: TradingSettings = {
     enableDesktopNotifications: true,
     soundAlerts: true,
     autoStartBridge: false,
+    telegramTradeReports: true,
   },
   executionSettings: {
     bridgeUrl: MT5_BRIDGE_DEFAULT_URL,
@@ -110,6 +134,16 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       ...DEFAULT_SETTINGS,
       tradingPaused: false,
+      savedMt5Accounts: [],
+      upsertSavedMt5Account: (account) =>
+        set((state) => ({
+          savedMt5Accounts: [
+            account,
+            ...state.savedMt5Accounts.filter((a) => a.login !== account.login),
+          ],
+        })),
+      removeSavedMt5Account: (login) =>
+        set((state) => ({ savedMt5Accounts: state.savedMt5Accounts.filter((a) => a.login !== login) })),
       setAccountBalance: (balance) => set({ accountBalance: balance }),
       setTradingPaused: (paused) => set({ tradingPaused: paused }),
       setRiskConfig: (config) =>
@@ -129,6 +163,7 @@ export const useSettingsStore = create<SettingsState>()(
         return {
           // A paused terminal must stay paused across crashes and autostart
           tradingPaused: state.tradingPaused,
+          savedMt5Accounts: state.savedMt5Accounts,
           accountBalance: state.accountBalance,
           riskConfig: state.riskConfig,
           generalSettings: state.generalSettings,

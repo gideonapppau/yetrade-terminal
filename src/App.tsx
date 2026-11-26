@@ -14,6 +14,7 @@ import { eq, and, or } from "drizzle-orm"
 import { logger } from "./core/logger"
 import type { OpenPosition } from "./core/execution-engine/types"
 import { decideClosure } from "./core/execution-engine/reconcile"
+import { sendTradeReport, formatTradeClosed } from "./core/telegram/reports"
 import { pipsToPoints } from "./lib/utils"
 
 type TradeRecord = typeof trades.$inferSelect
@@ -182,6 +183,7 @@ function App() {
             missedPolls.current.delete(t.id);
             changed = true;
             logger.info({ tradeId: t.id, pnl }, 'Position closed on broker');
+            sendTradeReport(formatTradeClosed({ symbol: t.symbol, direction: t.direction, volume: t.volume, pnl, ticket: t.id }));
           } else if (autoBreakeven || trailingStop) {
             // Look up the live position
             const pos = openPositions.find((p) => String(p.ticket) === t.id);

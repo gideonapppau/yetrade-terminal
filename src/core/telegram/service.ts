@@ -23,6 +23,7 @@ import { pipsToPoints, floorToStep } from '../../lib/utils';
 import { DEFAULT_MAX_SIGNAL_AGE_SECONDS, TELEGRAM_POLL_INTERVAL_MS, TELEGRAM_POLL_BATCH } from '../constants';
 import { toast } from 'sonner';
 import { playPop, playSuccess, playError } from '../../lib/sounds';
+import { sendTradeReport, formatTradeOpened, formatSignalNotTraded } from './reports';
 
 /** Shape of a telegram_channels row the pipeline needs. */
 export interface ChannelSignalRow {
@@ -618,6 +619,25 @@ export class TelegramService {
     const now = new Date();
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     const sourceName = channelRow?.name || 'Unknown Channel';
+
+    // Report the outcome to the user's Telegram "Saved Messages"
+    const reportSummary = {
+      symbol: parsed.symbol,
+      direction: parsed.direction,
+      entry: parsed.entry ?? null,
+      stopLoss: parsed.stopLoss,
+      takeProfit: parsed.takeProfits[0]?.price ?? null,
+      source: label ? `${sourceName} (${label})` : sourceName,
+    };
+    if (executed) {
+      sendTradeReport(formatTradeOpened({ ...reportSummary, volume: riskEvaluation?.positionSize ?? 0 }));
+    } else {
+      sendTradeReport(formatSignalNotTraded({
+        ...reportSummary,
+        status: riskEvaluation?.decision === 'APPROVED' ? 'MISSED' : 'REJECTED',
+        reason: rejectReason,
+      }));
+    }
 
     // Calculate theoretical RR if we have TPs
     let rr = 0;
