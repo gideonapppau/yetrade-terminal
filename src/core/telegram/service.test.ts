@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { countOpenGroups, resolveRiskPercent, selectNewMessages, isRepostOf, REPOST_WINDOW_MS } from './service';
+import { countOpenGroups, resolveRiskPercent, selectNewMessages, isRepostOf, REPOST_WINDOW_MS, TelegramService } from './service';
+import { TELEGRAM_DEAD_AFTER_FAILED_POLLS } from '../constants';
 
 describe('countOpenGroups', () => {
   it('counts TP legs of one signal as a single group', () => {
@@ -65,5 +66,44 @@ describe('isRepostOf', () => {
 
   it('ignores signals older than the re-post window', () => {
     expect(isRepostOf(parsed, [{ ...prior, receivedAt: now - REPOST_WINDOW_MS - 1 }], now)).toBe(false);
+  });
+});
+
+describe('TelegramService - dead connection detection', () => {
+  it('reports a lost connection once after every channel poll keeps failing', async () => {
+    const failing = {
+      subscribeToChannels: () => undefined,
+      getRecentMessages: async () => { throw new Error('Not connected'); },
+    };
+    const svc = new TelegramService(failing as never);
+    let lost = 0;
+    svc.onConnectionLost = () => { lost += 1; };
+    (svc as unknown as { pollChannelIds: string[] }).pollChannelIds = ['100', '200'];
+    const poll = () => (svc as unknown as { pollOnce: () => Promise<void> }).pollOnce();
+
+    for (let i = 0; i < TELEGRAM_DEAD_AFTER_FAILED_POLLS - 1; i++) await poll();
+    expect(lost).toBe(0);
+    await poll();
+    expect(lost).toBe(1);
+    await poll(); // keeps failing: no repeated callbacks
+    expect(lost).toBe(1);
+  });
+
+  it('a single successful channel resets the failure streak', async () => {
+    let calls = 0;
+    const flaky = {
+      subscribeToChannels: () => undefined,
+      getRecentMessages: async () => {
+        calls += 1;
+        if (calls % 5 === 0) return []; // flaky but alive: never 8 failures in a row
+        throw new Error('timeout');
+      },
+    };
+    const svc = new TelegramService(flaky as never);
+    let lost = 0;
+    svc.onConnectionLost = () => { lost += 1; };
+    (svc as unknown as { pollChannelIds: string[] }).pollChannelIds = ['100'];
+    for (let i = 0; i < 30; i++) await (svc as unknown as { pollOnce: () => Promise<void> }).pollOnce();
+    expect(lost).toBe(0);
   });
 });

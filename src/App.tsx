@@ -15,6 +15,8 @@ import { logger } from "./core/logger"
 import type { OpenPosition } from "./core/execution-engine/types"
 import { decideClosure } from "./core/execution-engine/reconcile"
 import { sendTradeReport, formatTradeClosed, tradeResultLabel } from "./core/telegram/reports"
+import { startOperationalReports } from "./core/monitoring"
+import { TELEGRAM_RECONNECT_DELAY_MS } from "./core/constants"
 import { planStopAdjustment, initialRiskDistance } from "./core/execution-engine/trade-management"
 
 type TradeRecord = typeof trades.$inferSelect
@@ -368,10 +370,30 @@ function App() {
   useEffect(() => {
     if (client && !service) {
       const ts = new TelegramService(client);
+      // A connection that silently died is rebuilt from scratch: drop the
+      // adapter and service, and the auto-reconnect effect below reconnects.
+      ts.onConnectionLost = () => {
+        ts.stopPolling();
+        void client.disconnect().catch(() => undefined);
+        useTelegramStore.getState().clearClient();
+        setConnectionState('DISCONNECTED');
+      };
       setService(ts);
       ts.startListening();
     }
-  }, [client, service, setService]);
+  }, [client, service, setService, setConnectionState]);
+
+  // Unattended recovery: a failed/offline Telegram connection is retried
+  // every minute instead of waiting for someone to notice.
+  useEffect(() => {
+    if (!config?.sessionString) return;
+    if (connectionState !== 'OFFLINE' && connectionState !== 'ERROR') return;
+    const timer = setTimeout(() => setConnectionState('DISCONNECTED'), TELEGRAM_RECONNECT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [connectionState, config?.sessionString, setConnectionState]);
+
+  // Startup message, MT5/AutoTrading alerts and the daily summary on Telegram
+  useEffect(() => startOperationalReports(), []);
 
   // Auto-reconnect on boot
   useEffect(() => {

@@ -35,6 +35,14 @@ interface MT5State {
 /** How often the bridge is probed for liveness. */
 const HEALTH_POLL_INTERVAL_MS = 15_000;
 
+/**
+ * While MT5 is unreachable, the full connect + saved-password login is
+ * retried every this many health polls (~60s). Unattended (e.g. on a VPS)
+ * a closed or crashed terminal would otherwise never be reconnected.
+ */
+const RECONNECT_EVERY_FAILED_POLLS = 4;
+let failedHealthPolls = 0;
+
 /** Module-scoped so repeated calls cannot stack duplicate timers. */
 let healthTimer: ReturnType<typeof setInterval> | null = null;
 /** Timestamp of the last connect/disconnect transition we acted on. */
@@ -165,6 +173,11 @@ export const useMT5Store = create<MT5State>((set, get) => ({
         alive = false;
       }
       if (alive) applyAutoTradingState(adapter.autoTradingEnabled);
+      failedHealthPolls = alive ? 0 : failedHealthPolls + 1;
+      if (!alive && failedHealthPolls % RECONNECT_EVERY_FAILED_POLLS === 0 && !get().isConnecting) {
+        logger.info({ failedHealthPolls }, 'MT5 unreachable - retrying connect and saved login');
+        void get().init();
+      }
       if (alive === isConnected) return;
 
       // Flap protection: a bridge that flickers between reachable and not

@@ -60,6 +60,38 @@ export function formatTradeClosed(t: { symbol: string; direction: string; volume
   return `${t.pnl != null && t.pnl < 0 ? '🔻' : '🏁'} Trade closed: ${t.direction} ${t.symbol} · ${t.volume} lots\n${result} · #${t.ticket}`;
 }
 
+export interface DailySummary {
+  date: string;
+  signalsByStatus: Record<string, number>;
+  notTradedReasons: Array<{ reason: string; count: number }>;
+  closed: { count: number; wins: number; losses: number; breakeven: number; pnl: number };
+  openTrades: number;
+  balance: number | null;
+  equity: number | null;
+  currency: string;
+}
+
+const money = (v: number, currency: string) => `${v >= 0 ? '+' : '-'}${Math.abs(v).toFixed(2)} ${currency}`;
+
+export function formatDailySummary(d: DailySummary): string {
+  const total = Object.values(d.signalsByStatus).reduce((a, b) => a + b, 0);
+  const s = (k: string) => d.signalsByStatus[k] ?? 0;
+  const lines = [
+    `📊 YeTrade daily summary - ${d.date}`,
+    `Signals: ${total} (executed ${s('EXECUTED')}, rejected ${s('REJECTED')}, missed ${s('MISSED')})`,
+    `Closed trades: ${d.closed.count} (${d.closed.wins}W / ${d.closed.losses}L / ${d.closed.breakeven}BE) · P/L ${money(d.closed.pnl, d.currency)}`,
+    `Open trades now: ${d.openTrades}`,
+  ];
+  if (d.balance != null) {
+    lines.push(`Balance ${d.balance.toFixed(2)} · Equity ${(d.equity ?? d.balance).toFixed(2)} ${d.currency}`);
+  }
+  if (d.notTradedReasons.length > 0) {
+    lines.push('Not traded because:');
+    for (const r of d.notTradedReasons.slice(0, 5)) lines.push(`• ${r.count}× ${r.reason}`);
+  }
+  return lines.join('\n');
+}
+
 /** Fire-and-forget: a failed report must never disturb trading. */
 export function sendTradeReport(text: string): void {
   if (useSettingsStore.getState().generalSettings.telegramTradeReports === false) return;

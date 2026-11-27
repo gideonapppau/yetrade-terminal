@@ -31,6 +31,15 @@ export const TELEGRAM_POLL_INTERVAL_MS = 15_000;
 export const TELEGRAM_POLL_BATCH = 5;
 
 /**
+ * Consecutive polls in which EVERY channel failed before the Telegram
+ * connection is declared dead and rebuilt (~2 minutes at the poll interval).
+ */
+export const TELEGRAM_DEAD_AFTER_FAILED_POLLS = 8;
+
+/** Delay before retrying a Telegram connection that failed or went offline. */
+export const TELEGRAM_RECONNECT_DELAY_MS = 60_000;
+
+/**
  * Connection retry attempts for the Telegram MTProto client. GramJS also uses
  * this for reconnects after a drop - at 1, a single network blip silently
  * kills the listener for the rest of the session.

@@ -20,7 +20,7 @@ import type { ParsedSignal } from '../signal-engine/types';
 import type { OpenPosition } from '../execution-engine/types';
 import type { AccountState } from '../risk-engine/types';
 import { pipsToPoints, floorToStep, moneyRiskPerLot } from '../../lib/utils';
-import { DEFAULT_MAX_SIGNAL_AGE_SECONDS, TELEGRAM_POLL_INTERVAL_MS, TELEGRAM_POLL_BATCH } from '../constants';
+import { DEFAULT_MAX_SIGNAL_AGE_SECONDS, TELEGRAM_POLL_INTERVAL_MS, TELEGRAM_POLL_BATCH, TELEGRAM_DEAD_AFTER_FAILED_POLLS } from '../constants';
 import { toast } from 'sonner';
 import { playPop, playSuccess, playError } from '../../lib/sounds';
 import { sendTradeReport, formatTradeOpened, formatSignalNotTraded } from './reports';
@@ -180,6 +180,13 @@ export class TelegramService {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private pollChannelIds: string[] = [];
   private polling = false;
+  /** Polls in a row where every channel failed - a sign the connection is dead. */
+  private failedPollStreak = 0;
+  /**
+   * Called once when polling shows the Telegram connection is dead, so the
+   * app can rebuild it. Unattended (e.g. on a VPS) nobody would notice.
+   */
+  onConnectionLost?: () => void;
 
   constructor(adapter: TelegramAdapter) {
     this.adapter = adapter;
@@ -261,9 +268,11 @@ export class TelegramService {
     try {
       const maxAge =
         useSettingsStore.getState().executionSettings.maxSignalAgeSeconds ?? DEFAULT_MAX_SIGNAL_AGE_SECONDS;
+      let anySucceeded = false;
       for (const channelId of this.pollChannelIds) {
         try {
           const recent = await this.adapter.getRecentMessages(channelId, TELEGRAM_POLL_BATCH);
+          anySucceeded = true;
           if (recent.length === 0) continue;
           const fresh = selectNewMessages(recent, this.lastPolledId.get(channelId), maxAge);
           const newest = Math.max(...recent.map((m) => Number(m.messageId)));
@@ -276,6 +285,13 @@ export class TelegramService {
           }
         } catch (err) {
           logger.warn({ err, channelId }, 'Polling a Telegram channel failed');
+        }
+      }
+      if (this.pollChannelIds.length > 0) {
+        this.failedPollStreak = anySucceeded ? 0 : this.failedPollStreak + 1;
+        if (this.failedPollStreak === TELEGRAM_DEAD_AFTER_FAILED_POLLS) {
+          logger.error('Telegram connection appears dead - every channel poll is failing');
+          this.onConnectionLost?.();
         }
       }
     } finally {
