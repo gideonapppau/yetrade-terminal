@@ -36,6 +36,13 @@ export const TELEGRAM_POLL_BATCH = 5;
  */
 export const TELEGRAM_DEAD_AFTER_FAILED_POLLS = 8;
 
+/**
+ * A single channel poll that takes longer than this counts as failed. A dead
+ * GramJS connection can leave requests hanging forever, which used to block
+ * every later poll and hid the outage from the dead-connection detector.
+ */
+export const TELEGRAM_POLL_TIMEOUT_MS = 15_000;
+
 /** Delay before retrying a Telegram connection that failed or went offline. */
 export const TELEGRAM_RECONNECT_DELAY_MS = 60_000;
 

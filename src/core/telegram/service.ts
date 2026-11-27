@@ -20,7 +20,7 @@ import type { ParsedSignal } from '../signal-engine/types';
 import type { OpenPosition } from '../execution-engine/types';
 import type { AccountState } from '../risk-engine/types';
 import { pipsToPoints, floorToStep, moneyRiskPerLot } from '../../lib/utils';
-import { DEFAULT_MAX_SIGNAL_AGE_SECONDS, TELEGRAM_POLL_INTERVAL_MS, TELEGRAM_POLL_BATCH, TELEGRAM_DEAD_AFTER_FAILED_POLLS } from '../constants';
+import { DEFAULT_MAX_SIGNAL_AGE_SECONDS, TELEGRAM_POLL_INTERVAL_MS, TELEGRAM_POLL_BATCH, TELEGRAM_DEAD_AFTER_FAILED_POLLS, TELEGRAM_POLL_TIMEOUT_MS } from '../constants';
 import { toast } from 'sonner';
 import { playPop, playSuccess, playError } from '../../lib/sounds';
 import { sendTradeReport, formatTradeOpened, formatSignalNotTraded } from './reports';
@@ -168,6 +168,15 @@ export function isRepostOf(
   );
 }
 
+/** Rejects if `promise` does not settle within `ms` (the promise itself keeps running). */
+export function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 export class TelegramService {
   private adapter: TelegramAdapter;
   private parser: RegexParser;
@@ -187,6 +196,8 @@ export class TelegramService {
    * app can rebuild it. Unattended (e.g. on a VPS) nobody would notice.
    */
   onConnectionLost?: () => void;
+  /** Per-channel poll time limit (overridable in tests). */
+  pollTimeoutMs = TELEGRAM_POLL_TIMEOUT_MS;
 
   constructor(adapter: TelegramAdapter) {
     this.adapter = adapter;
@@ -271,7 +282,11 @@ export class TelegramService {
       let anySucceeded = false;
       for (const channelId of this.pollChannelIds) {
         try {
-          const recent = await this.adapter.getRecentMessages(channelId, TELEGRAM_POLL_BATCH);
+          const recent = await withTimeout(
+            this.adapter.getRecentMessages(channelId, TELEGRAM_POLL_BATCH),
+            this.pollTimeoutMs,
+            `Polling channel ${channelId} timed out`
+          );
           anySucceeded = true;
           if (recent.length === 0) continue;
           const fresh = selectNewMessages(recent, this.lastPolledId.get(channelId), maxAge);

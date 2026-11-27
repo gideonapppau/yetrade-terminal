@@ -239,6 +239,12 @@ export class TelegramAdapter {
    */
   async getRecentMessages(channelId: string, limit: number): Promise<RawTelegramMessage[]> {
     if (!this.client || this.state !== 'CONNECTED') return [];
+    // `state` only records the initial connect. After GramJS gives up
+    // reconnecting, the socket is gone while `state` still says CONNECTED -
+    // fail loudly so the service notices and rebuilds the connection.
+    if (this.client.connected === false) {
+      throw new Error('Telegram socket is disconnected');
+    }
     const key = channelId.replace(/^-100/, '');
     let entity = this.entityById.get(key);
     if (!entity) {

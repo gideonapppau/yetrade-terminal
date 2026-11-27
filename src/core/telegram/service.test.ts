@@ -107,3 +107,21 @@ describe('TelegramService - dead connection detection', () => {
     expect(lost).toBe(0);
   });
 });
+
+describe('TelegramService - hung polls (dead socket)', () => {
+  it('treats polls that never answer as failures and reports the lost connection', async () => {
+    const hanging = {
+      subscribeToChannels: () => undefined,
+      getRecentMessages: () => new Promise<never>(() => undefined), // never settles
+    };
+    const svc = new TelegramService(hanging as never);
+    svc.pollTimeoutMs = 5;
+    let lost = 0;
+    svc.onConnectionLost = () => { lost += 1; };
+    (svc as unknown as { pollChannelIds: string[] }).pollChannelIds = ['100'];
+    for (let i = 0; i < TELEGRAM_DEAD_AFTER_FAILED_POLLS; i++) {
+      await (svc as unknown as { pollOnce: () => Promise<void> }).pollOnce();
+    }
+    expect(lost).toBe(1);
+  });
+});
