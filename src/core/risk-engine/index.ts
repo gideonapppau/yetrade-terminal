@@ -210,7 +210,7 @@ export class RiskEngine {
           ruleResults.push({
             ruleName: 'Position Sizing',
             passed: false,
-            message: 'Instrument metadata unavailable - cannot size the position safely'
+            message: `Could not get ${signal.symbol} details from MT5 (is the symbol available on this broker?) - cannot size the position safely`
           });
           isApproved = false;
         } else {

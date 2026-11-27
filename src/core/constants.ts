@@ -43,6 +43,14 @@ export const TELEGRAM_DEAD_AFTER_FAILED_POLLS = 8;
  */
 export const TELEGRAM_POLL_TIMEOUT_MS = 15_000;
 
+/**
+ * How long a signal waits for MT5 when it arrives while the broker link is
+ * still coming up (app start, reconnect). A TRADE PULSE signal 9 seconds
+ * after a restart was rejected because the bridge was 4 seconds from ready.
+ * Never longer than the signal's remaining max age.
+ */
+export const MT5_WAIT_FOR_CONNECTION_MS = 60_000;
+
 /** Delay before retrying a Telegram connection that failed or went offline. */
 export const TELEGRAM_RECONNECT_DELAY_MS = 60_000;
 

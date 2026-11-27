@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { countOpenGroups, resolveRiskPercent, selectNewMessages, isRepostOf, REPOST_WINDOW_MS, TelegramService } from './service';
+import { countOpenGroups, resolveRiskPercent, selectNewMessages, isRepostOf, REPOST_WINDOW_MS, TelegramService, waitForMt5Connection } from './service';
+import { useMT5Store } from '../../store/mt5';
 import { TELEGRAM_DEAD_AFTER_FAILED_POLLS } from '../constants';
 
 describe('countOpenGroups', () => {
@@ -123,5 +124,20 @@ describe('TelegramService - hung polls (dead socket)', () => {
       await (svc as unknown as { pollOnce: () => Promise<void> }).pollOnce();
     }
     expect(lost).toBe(1);
+  });
+});
+
+describe('waitForMt5Connection (signal arriving during startup)', () => {
+  it('resolves as soon as MT5 connects', async () => {
+    useMT5Store.setState({ isConnected: false });
+    setTimeout(() => useMT5Store.setState({ isConnected: true }), 30);
+    const started = Date.now();
+    await expect(waitForMt5Connection(2000, 10)).resolves.toBe(true);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('gives up after the time budget when MT5 stays down', async () => {
+    useMT5Store.setState({ isConnected: false });
+    await expect(waitForMt5Connection(50, 10)).resolves.toBe(false);
   });
 });

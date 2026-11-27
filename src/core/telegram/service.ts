@@ -20,7 +20,7 @@ import type { ParsedSignal } from '../signal-engine/types';
 import type { OpenPosition } from '../execution-engine/types';
 import type { AccountState } from '../risk-engine/types';
 import { pipsToPoints, floorToStep, moneyRiskPerLot } from '../../lib/utils';
-import { DEFAULT_MAX_SIGNAL_AGE_SECONDS, TELEGRAM_POLL_INTERVAL_MS, TELEGRAM_POLL_BATCH, TELEGRAM_DEAD_AFTER_FAILED_POLLS, TELEGRAM_POLL_TIMEOUT_MS } from '../constants';
+import { MT5_WAIT_FOR_CONNECTION_MS, DEFAULT_MAX_SIGNAL_AGE_SECONDS, TELEGRAM_POLL_INTERVAL_MS, TELEGRAM_POLL_BATCH, TELEGRAM_DEAD_AFTER_FAILED_POLLS, TELEGRAM_POLL_TIMEOUT_MS } from '../constants';
 import { toast } from 'sonner';
 import { playPop, playSuccess, playError } from '../../lib/sounds';
 import { sendTradeReport, formatTradeOpened, formatSignalNotTraded } from './reports';
@@ -175,6 +175,23 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, message: string)
     timer = setTimeout(() => reject(new Error(message)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** Resolves true as soon as MT5 is connected, or false after `timeoutMs`. */
+export function waitForMt5Connection(timeoutMs: number, pollMs = 1000): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (useMT5Store.getState().isConnected) return resolve(true);
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (useMT5Store.getState().isConnected) {
+        clearInterval(timer);
+        resolve(true);
+      } else if (Date.now() - started >= timeoutMs) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, pollMs);
+  });
 }
 
 export class TelegramService {
@@ -530,20 +547,34 @@ export class TelegramService {
 
     // 1. Trigger Risk Engine
     const settings = useSettingsStore.getState();
-    const mt5 = useMT5Store.getState();
     const paused = settings.tradingPaused;
     let rejectReason: string | undefined;
-
-    // Hard blocks evaluated before any broker or risk work: the kill-switch,
-    // then signal staleness (e.g. redelivery after a reconnect).
     const maxAgeSeconds =
       settings.executionSettings.maxSignalAgeSeconds ?? DEFAULT_MAX_SIGNAL_AGE_SECONDS;
+
+    // A signal that lands while MT5 is still connecting (app start, reconnect)
+    // waits for it - bounded by the signal's remaining age budget - instead
+    // of being rejected for lack of broker data.
+    if (!paused && !useMT5Store.getState().isConnected) {
+      const ageMs = Date.now() - rawMessage.timestamp.getTime();
+      const budgetMs = Math.min(MT5_WAIT_FOR_CONNECTION_MS, maxAgeSeconds * 1000 - ageMs);
+      if (budgetMs > 0) {
+        logger.info({ signalId, budgetMs }, 'MT5 not connected yet - waiting before evaluating the signal');
+        await waitForMt5Connection(budgetMs);
+      }
+    }
+    const mt5 = useMT5Store.getState();
+
+    // Hard blocks evaluated before any broker or risk work: the kill-switch,
+    // signal staleness (e.g. redelivery after a reconnect), no broker link.
     const ageSeconds = Math.round((Date.now() - rawMessage.timestamp.getTime()) / 1000);
     const blockReason = paused
       ? 'Trading paused via kill-switch'
       : ageSeconds > maxAgeSeconds
         ? `Signal is ${ageSeconds}s old (max ${maxAgeSeconds}s)`
-        : undefined;
+        : !mt5.isConnected
+          ? 'MetaTrader 5 is not connected - the trade could not be placed'
+          : undefined;
 
     // Channel-level overrides fall back to the global risk configuration.
     // Values are honored exactly as configured - never raised to a floor,
